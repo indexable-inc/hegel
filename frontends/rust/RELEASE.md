@@ -23,3 +23,5 @@ impl Source for Seeds {
 
 hegel::Hegel::new(|tc| { /* ... */ }).run_with_source(&mut Seeds(0));
 ```
+
+With the `static-engine` feature, `hegel` now builds for WASI (`wasm32-wasip1`, `wasm32-wasip2`), since its engine picks the WebAssembly platform backend there.

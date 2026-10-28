@@ -1,4 +1,4 @@
-//! Browser WebAssembly backend for [`crate::sys`].
+//! WebAssembly backend for [`crate::sys`], for the browser and for WASI.
 //!
 //! The raw module imports entropy and monotonic time from the `hegel_host`
 //! WebAssembly import module. A random-fill function returns nonzero on
