@@ -1,3 +1,4 @@
+use crate::explore::Source;
 use crate::test_case::TestCase;
 
 /// Health checks that can be suppressed during test execution.
@@ -638,6 +639,20 @@ where
     ///
     /// Panics if any test case fails.
     pub fn run(self) {
+        self.run_from(None);
+    }
+
+    /// [`run`](Self::run), with the generation phase taking its test cases
+    /// from `source` instead of drawing them at random. See
+    /// [`explore`](crate::explore).
+    ///
+    /// A [`reproduce_failure`](Self::reproduce_failure) blob takes
+    /// precedence: the run replays it and never consults `source`.
+    pub fn run_with_source(self, source: &mut dyn Source) {
+        self.run_from(Some(source));
+    }
+
+    fn run_from(self, source: Option<&mut dyn Source>) {
         let mut settings = self.settings;
         if self.single_test_case {
             settings = settings.for_single_test_case();
@@ -658,6 +673,7 @@ where
             &settings,
             self.database_key.as_deref(),
             self.test_location.as_ref(),
+            source,
         );
     }
 }

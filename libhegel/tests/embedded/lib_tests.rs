@@ -215,6 +215,7 @@ fn engine_suspending_without_an_offer_becomes_a_run_error() {
         current_family: None,
         result: None,
         reporter: None,
+        report: None,
     }));
 
     unsafe {
@@ -318,6 +319,7 @@ fn every_run_error_maps_to_its_kind_through_the_abi() {
             current_family: None,
             result: None,
             reporter: None,
+            report: None,
         }));
         unsafe {
             let mut tc: *mut HegelTestCase = ptr::null_mut();
@@ -397,6 +399,7 @@ fn internal_run_error_surfaces_through_run_result_error() {
         current_family: None,
         result: None,
         reporter: None,
+        report: None,
     }));
 
     unsafe {

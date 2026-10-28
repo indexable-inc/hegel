@@ -44,6 +44,7 @@ use crate::native::database::{
     TestCaseDatabase, deserialize_choices, serialize_choices, serialize_nodes,
 };
 use crate::native::exec_cache::{ExecCache, KindLedger};
+use crate::native::external::{Next, encode_report};
 use crate::native::graph::{Graph, Run, Walked};
 use crate::native::graph_shrink::{
     GraphProbe, GraphShrinker, Outcome as GraphOutcome, ProbeFuture as GraphProbeFuture,
@@ -226,6 +227,28 @@ pub(crate) async fn explore(
         core::time::Duration::from_secs(MAX_SHRINKING_SECONDS),
     )
     .await
+}
+
+/// [`explore`] under external generation (used by
+/// `hegel_run_start_external`): the generation phase asks its driver for
+/// each case through `exchange` instead of drawing it, and posts each such
+/// case's report back (see [`crate::native::external`]). The engine's own
+/// exploration passes — targeting, span mutation and grammar mutation — do
+/// not run, since the driver decides what runs next. Database replay, the
+/// simplest case, shrinking and the database are unchanged.
+pub(crate) async fn explore_external(
+    settings: &Settings,
+    database_key: Option<&str>,
+    exchange: &CaseExchange,
+) -> Result<TestRunResult, RunError> {
+    let mut engine = Engine::new(settings, database_key, exchange)?;
+    engine.external = true;
+    engine
+        .run(
+            TOO_SLOW_THRESHOLD,
+            core::time::Duration::from_secs(MAX_SHRINKING_SECONDS),
+        )
+        .await
 }
 
 /// Replay a reproduce blob (used by `hegel_run_start_blob`) and return the
@@ -572,7 +595,9 @@ impl<'a> Engine<'a> {
         }
 
         self.capture_discoveries = true;
+        let mut external_done = false;
         while settings.phases.contains(&Phase::Generate)
+            && !external_done
             && !found_in_reuse
             && !self.test_is_trivial
             && self.budget_used() < max_test_cases
@@ -606,12 +631,31 @@ impl<'a> Engine<'a> {
                     break;
                 }
 
-                let mut case_rng = self.rng.spawn();
-                let params = crate::native::core::GenerationParameters::draw(&mut case_rng)?;
-                let ntc =
-                    NativeTestCase::new_random_with_params(case_rng, params, self.choice_bound());
+                let (ntc, proposal_id) = if self.external {
+                    match self.exchange.request_proposal().await? {
+                        Next::Run(proposal) => {
+                            (proposal.test_case(self.choice_bound())?, Some(proposal.id))
+                        }
+                        Next::Done => {
+                            external_done = true;
+                            break;
+                        }
+                    }
+                } else {
+                    let mut case_rng = self.rng.spawn();
+                    let params = crate::native::core::GenerationParameters::draw(&mut case_rng)?;
+                    let ntc = NativeTestCase::new_random_with_params(
+                        case_rng,
+                        params,
+                        self.choice_bound(),
+                    );
+                    (ntc, None)
+                };
 
                 let (run, mismatch) = self.test_function(ntc).await?;
+                if let Some(id) = proposal_id {
+                    self.exchange.post_report(encode_report(id, &run));
+                }
                 if let Some(err) = mismatch {
                     return Err(err);
                 }
@@ -663,6 +707,7 @@ impl<'a> Engine<'a> {
                 }
 
                 if target_phase
+                    && !self.external
                     && (!self.origins.any_live() || !stop_on_first)
                     && !self.targeting.is_empty()
                     && target_schedule.should_fire(self.valid_test_cases, self.targeting.version())
@@ -687,6 +732,7 @@ impl<'a> Engine<'a> {
                 }
 
                 if run.status == Status::Valid
+                    && !self.external
                     && (self.valid_test_cases >= HEALTH_CHECK_MAX_VALID || self.origins.any_live())
                     && !self.try_span_mutation(&run.nodes, &run.spans).await?
                 {
@@ -1552,6 +1598,9 @@ pub(crate) struct Engine<'a> {
     /// probes are measurement runs), and the case that itself flips the
     /// run (its stamp decision predates the flip).
     capture_discoveries: bool,
+    /// Set for a run under external generation ([`explore_external`]): the
+    /// generation phase takes its cases from the driver.
+    external: bool,
 }
 
 impl<'a> Engine<'a> {
@@ -1595,6 +1644,7 @@ impl<'a> Engine<'a> {
             reuse_replays: false,
             capture_replays: false,
             capture_discoveries: false,
+            external: false,
         })
     }
 

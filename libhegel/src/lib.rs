@@ -251,8 +251,9 @@ use crate::backend::{
 };
 use crate::control::hegel_internal_unwrap;
 use crate::embed::{data_source_for_blob, run_native_async};
-use crate::exchange::CaseExchange;
+use crate::exchange::{CaseExchange, Handoff};
 use crate::native::bignum::BigInt;
+use crate::native::external::Next;
 use crate::native::printer::{Printer, PrinterError, Target as PrinterTarget};
 use crate::native::reflow::{ReflowOptions, reflow};
 use crate::settings::{
@@ -315,8 +316,15 @@ pub enum hegel_result_t {
     HEGEL_E_RETRY = -10,
 
     /// There is nothing at the index asked for:
-    /// `hegel_grammar_builder_file` past the end of the list of files.
+    /// `hegel_grammar_builder_file` past the end of the list of files; or
+    /// nothing to read: `hegel_run_case_report` with no new report.
     HEGEL_E_NOT_FOUND = -11,
+
+    /// From `hegel_next_test_case` on a run started with
+    /// `hegel_run_start_external`: the engine wants its next generation case.
+    /// Supply it with `hegel_run_propose`, or end generation with
+    /// `hegel_run_end_generation`, then call `hegel_next_test_case` again.
+    HEGEL_E_NEEDS_PROPOSAL = -12,
 }
 
 use hegel_result_t::*;
@@ -386,6 +394,45 @@ pub enum hegel_backend_t {
     /// selected by the shipped `workload` profile; you almost certainly
     /// don't want it otherwise.
     HEGEL_BACKEND_URANDOM = 2,
+}
+
+/// How the test case built from a proposal draws past its prefix. Passed to
+/// `hegel_run_propose`.
+#[repr(C)]
+#[derive(Copy, Clone)]
+#[allow(non_camel_case_types)]
+pub enum hegel_tail_t {
+    /// At random, from a generator seeded with the proposal's seed, so the
+    /// same proposal draws the same tail whatever ran before it.
+    HEGEL_TAIL_RANDOM = 1,
+    /// Every draw at its simplest value.
+    HEGEL_TAIL_SIMPLEST = 2,
+}
+
+/// A borrowed byte sequence of `len` bytes. Zero length accepts any
+/// pointer, including NULL. As an input, the caller keeps the bytes alive
+/// for the call; as an output, the bytes borrow their documented owner.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+#[allow(non_camel_case_types)]
+pub struct hegel_bytes_t {
+    pub data: *const u8,
+    pub len: usize,
+}
+
+impl hegel_bytes_t {
+    unsafe fn as_slice<'a>(self) -> Result<&'a [u8], &'static str> {
+        if self.len > isize::MAX as usize {
+            return Err("length exceeds isize::MAX");
+        }
+        if self.len == 0 {
+            return Ok(&[]);
+        }
+        if self.data.is_null() {
+            return Err("is null");
+        }
+        Ok(unsafe { core::slice::from_raw_parts(self.data, self.len) })
+    }
 }
 
 /// Aggregate outcome of a finished run, read via `hegel_run_result_status`.
@@ -964,6 +1011,9 @@ pub struct HegelRun {
     /// Reports the run's verdict to Antithesis when the result is known;
     /// `None` when the settings carried no test location.
     reporter: Option<Reporter>,
+    /// The case report last read by `hegel_run_case_report`, which the
+    /// bytes it returned borrow.
+    report: Option<Vec<u8>>,
 }
 
 impl HegelRun {
@@ -2347,17 +2397,84 @@ pub unsafe extern "C" fn hegel_run_start(
     user_data: *mut c_void,
     out_run: *mut *mut HegelRun,
 ) -> hegel_result_t {
+    unsafe {
+        start_exploring_run(
+            ctx,
+            "hegel_run_start",
+            false,
+            settings,
+            callback,
+            user_data,
+            out_run,
+        )
+    }
+}
+
+/// Like `hegel_run_start`, but the run's generation phase takes each test
+/// case from the caller as data instead of drawing it. Everything else is
+/// as `hegel_run_start`: database replay, the simplest test case,
+/// shrinking every failure found, and the database.
+///
+/// When the engine wants its next generation case, `hegel_next_test_case`
+/// returns `HEGEL_E_NEEDS_PROPOSAL` and no test case. Answer with
+/// `hegel_run_propose` (the case, as a choice prefix plus how to draw past
+/// it) or `hegel_run_end_generation`, then call `hegel_next_test_case`
+/// again. The engine's own exploration passes (targeting, span mutation,
+/// grammar mutation) do not run. Generation also ends, without asking,
+/// where `hegel_run_start`'s would: at the `test_cases` budget, or after a
+/// failure when `stop_on_first_failure` is set. Health checks apply to
+/// proposed cases as to drawn ones: rejecting too many of them, or too many
+/// overrunning or running too slowly, fails the run unless that health
+/// check is suppressed.
+///
+/// After running a case built from a proposal, the engine makes that case's
+/// report available to `hegel_run_case_report`, by the time
+/// `hegel_next_test_case` next returns.
+///
+/// Parameters and return values: as `hegel_run_start`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hegel_run_start_external(
+    ctx: *mut HegelContext,
+    settings: *const HegelSettings,
+    callback: hegel_output_callback_t,
+    user_data: *mut c_void,
+    out_run: *mut *mut HegelRun,
+) -> hegel_result_t {
+    unsafe {
+        start_exploring_run(
+            ctx,
+            "hegel_run_start_external",
+            true,
+            settings,
+            callback,
+            user_data,
+            out_run,
+        )
+    }
+}
+
+/// The shared body of `hegel_run_start` and `hegel_run_start_external`,
+/// reporting errors under `name`.
+unsafe fn start_exploring_run(
+    ctx: *mut HegelContext,
+    name: &str,
+    external: bool,
+    settings: *const HegelSettings,
+    callback: hegel_output_callback_t,
+    user_data: *mut c_void,
+    out_run: *mut *mut HegelRun,
+) -> hegel_result_t {
     clear_last_error(ctx);
     if out_run.is_null() {
-        set_last_error(ctx, "hegel_run_start: out parameter is null");
+        set_last_error(ctx, &format!("{name}: out parameter is null"));
         return HEGEL_E_INVALID_ARG;
     }
     if let Err(err) = crate::antithesis::check_environment() {
-        set_last_error(ctx, &format!("hegel_run_start: {err}"));
+        set_last_error(ctx, &format!("{name}: {err}"));
         return HEGEL_E_INVALID_ARG;
     }
     let Some(handle) = (unsafe { settings.as_ref() }) else {
-        set_last_error(ctx, "hegel_run_start: settings pointer is null");
+        set_last_error(ctx, &format!("{name}: settings pointer is null"));
         return HEGEL_E_INVALID_HANDLE;
     };
     let settings = handle
@@ -2369,9 +2486,20 @@ pub unsafe extern "C" fn hegel_run_start(
 
     let exchange = Arc::new(CaseExchange::new());
     let engine_exchange = Arc::clone(&exchange);
-    let engine: EngineFuture = Box::pin(async move {
-        run_native_async(&settings, database_key.as_deref(), &engine_exchange).await
-    });
+    let engine: EngineFuture = if external {
+        Box::pin(async move {
+            crate::native::test_runner::explore_external(
+                &settings,
+                database_key.as_deref(),
+                &engine_exchange,
+            )
+            .await
+        })
+    } else {
+        Box::pin(async move {
+            run_native_async(&settings, database_key.as_deref(), &engine_exchange).await
+        })
+    };
 
     let run = Box::into_raw(Box::new(HegelRun {
         engine: Some(engine),
@@ -2379,6 +2507,7 @@ pub unsafe extern "C" fn hegel_run_start(
         current_family: None,
         result: None,
         reporter,
+        report: None,
     }));
     unsafe { *out_run = run };
     HEGEL_OK
@@ -2457,6 +2586,7 @@ pub unsafe extern "C" fn hegel_run_start_blob(
         current_family: None,
         result: None,
         reporter,
+        report: None,
     }));
     unsafe { *out_run = run };
     HEGEL_OK
@@ -2469,7 +2599,10 @@ pub unsafe extern "C" fn hegel_run_start_blob(
 /// Returns `HEGEL_OK`, including at normal completion, where
 /// `*out_test_case` is NULL and you should call `hegel_run_result`.
 /// `HEGEL_E_NOT_COMPLETE` if the previous test case was not marked
-/// complete.
+/// complete, or if the engine is still waiting for the proposal it asked
+/// for. On a run from `hegel_run_start_external`,
+/// `HEGEL_E_NEEDS_PROPOSAL` (with `*out_test_case` NULL) when the engine
+/// wants its next generation case.
 ///
 /// The handle is owned by the caller and must be released with
 /// `hegel_test_case_free`.
@@ -2510,15 +2643,25 @@ pub unsafe extern "C" fn hegel_next_test_case(
         return HEGEL_OK;
     };
 
+    if run.exchange.awaiting_proposal() {
+        set_last_error(
+            ctx,
+            "hegel_next_test_case: the engine is waiting for a proposal \
+             (call hegel_run_propose or hegel_run_end_generation first)",
+        );
+        return HEGEL_E_NOT_COMPLETE;
+    }
+
     match poll_engine(engine) {
-        Poll::Pending => match run.exchange.take() {
-            Ok(ds) => {
+        Poll::Pending => match run.exchange.take_handoff() {
+            Ok(Handoff::Case(ds)) => {
                 let family = new_family(ds, None);
                 let case = handle_from_family(Arc::clone(&family));
                 run.current_family = Some(family);
                 unsafe { *out_test_case = case };
                 HEGEL_OK
             }
+            Ok(Handoff::Proposal) => HEGEL_E_NEEDS_PROPOSAL,
             Err(e) => {
                 run.finish(HegelRunResult::from_error(&RunError::from(e)));
                 HEGEL_OK
@@ -2532,6 +2675,168 @@ pub unsafe extern "C" fn hegel_next_test_case(
             HEGEL_OK
         }
     }
+}
+
+/// Answer the engine's request for its next generation case (see
+/// `hegel_run_start_external`) with a test case as data.
+///
+/// Parameters:
+/// `id`: Echoed in this case's report.
+/// `prefix`: The case's first choices, in the encoding of the engine's
+///   example database: a u32 count, then per choice a one-byte type tag
+///   and its value (all little-endian). Tag 0 is an integer: the byte 10,
+///   a u32 length and that many two's-complement bytes. Tag 1 is a
+///   boolean: one byte, 0 or 1. Tag 2 is a float: its 8-byte IEEE-754 bit
+///   pattern. Tag 3 is bytes: a u32 length and the bytes. Tag 4 is a
+///   string: a u32 codepoint count and a u32 per codepoint. Tag 5 is the
+///   choices of a cloned test case, recursively in this same layout. Each
+///   draw takes the next choice in order. A choice that does not fit its
+///   draw (another type, or out of bounds) is replaced by a value of the
+///   draw's that does.
+/// `tail`: A `hegel_tail_t`: how the case draws past the prefix.
+/// `seed`: Seeds the tail under `HEGEL_TAIL_RANDOM`; ignored otherwise.
+///
+/// Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` for a prefix that does not
+/// decode, an unknown `tail`, or a run that is not waiting for a proposal.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hegel_run_propose(
+    ctx: *mut HegelContext,
+    run: *mut HegelRun,
+    id: u64,
+    prefix: hegel_bytes_t,
+    tail: u32,
+    seed: u64,
+) -> hegel_result_t {
+    clear_last_error(ctx);
+    let Some(run) = (unsafe { run.as_mut() }) else {
+        set_last_error(ctx, "hegel_run_propose: run pointer is null");
+        return HEGEL_E_INVALID_HANDLE;
+    };
+    let tail = match tail {
+        x if x == hegel_tail_t::HEGEL_TAIL_RANDOM as u32 => {
+            crate::native::external::Tail::Random { seed }
+        }
+        x if x == hegel_tail_t::HEGEL_TAIL_SIMPLEST as u32 => {
+            crate::native::external::Tail::Simplest
+        }
+        _ => {
+            set_last_error(ctx, &format!("hegel_run_propose: unknown tail {tail}"));
+            return HEGEL_E_INVALID_ARG;
+        }
+    };
+    let prefix = match unsafe { prefix.as_slice() } {
+        Ok(bytes) => bytes,
+        Err(why) => {
+            set_last_error(ctx, &format!("hegel_run_propose: prefix {why}"));
+            return HEGEL_E_INVALID_ARG;
+        }
+    };
+    let Some(prefix) = crate::native::database::deserialize_choices_exact(prefix) else {
+        set_last_error(
+            ctx,
+            "hegel_run_propose: prefix is not a valid encoded choice sequence",
+        );
+        return HEGEL_E_INVALID_ARG;
+    };
+    let proposal = crate::native::external::Proposal { id, prefix, tail };
+    unsafe { provide_next(ctx, run, "hegel_run_propose", Next::Run(proposal)) }
+}
+
+/// Answer the engine's request for its next generation case (see
+/// `hegel_run_start_external`) by ending generation. The run goes on to
+/// shrink what it found and finishes as usual.
+///
+/// Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` for a run that is not
+/// waiting for a proposal.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hegel_run_end_generation(
+    ctx: *mut HegelContext,
+    run: *mut HegelRun,
+) -> hegel_result_t {
+    clear_last_error(ctx);
+    let Some(run) = (unsafe { run.as_mut() }) else {
+        set_last_error(ctx, "hegel_run_end_generation: run pointer is null");
+        return HEGEL_E_INVALID_HANDLE;
+    };
+    unsafe { provide_next(ctx, run, "hegel_run_end_generation", Next::Done) }
+}
+
+unsafe fn provide_next(
+    ctx: *mut HegelContext,
+    run: &HegelRun,
+    name: &str,
+    next: Next,
+) -> hegel_result_t {
+    if run.exchange.provide(next).is_err() {
+        set_last_error(
+            ctx,
+            &format!("{name}: the run is not waiting for a proposal"),
+        );
+        return HEGEL_E_INVALID_ARG;
+    }
+    HEGEL_OK
+}
+
+/// Read the report of the most recent test case built from a proposal
+/// (see `hegel_run_start_external`), once.
+///
+/// Parameters:
+/// `out_report`: Receives the report, borrowed from the run until the next
+///   `hegel_run_case_report` call on it or `hegel_run_free`.
+///
+/// Returns `HEGEL_OK`, or `HEGEL_E_NOT_FOUND` (with `*out_report` empty)
+/// when no case has been reported since the last call. A report the caller
+/// does not read before the next proposed case finishes is replaced.
+///
+/// The report is versioned binary, all integers little-endian. An `int` is
+/// a u32 byte count and the value's two's-complement bytes, a `str` a u32
+/// byte count and UTF-8, a `size` a u64, and a float its IEEE-754 bit
+/// pattern:
+///
+/// ```text
+/// report  = version:u8(=1) id:u64 status:u8 origin:opt<str> stream
+///           targets:u32 (label:str score:f64)*    -- sorted by label
+///           events:u32 (label:str value:opt<f64>)* -- in recording order
+/// status  = 0 valid | 1 invalid | 2 overrun | 3 interesting
+/// opt<T>  = 0 | 1 T
+/// stream  = nodes:u32 node* spans:u32 span*
+/// node    = tag:u8 forced:u8 body
+///   tag 0 integer: min:int max:int shrink_towards:int value:int
+///   tag 1 boolean: p:f64 value:u8
+///   tag 2 float:   min:f64 max:f64 allow_nan:u8 allow_infinity:u8
+///                  smallest_nonzero_magnitude:f64 value:f64
+///   tag 3 bytes:   min_size:size max_size:size len:u32 byte*
+///   tag 4 string:  min_size:size max_size:size constrained:u8
+///                  intervals:u32 (start:u32 end:u32)* len:u32 codepoint:u32*
+///   tag 5 clone:   stream
+/// span    = start:u64 end:u64 label:u64 depth:u32 parent:opt<u64>
+///           discarded:u8
+/// ```
+///
+/// A string's `constrained` is 1 when a regex or grammar constrains it
+/// beyond its alphabet, whose inclusive codepoint ranges follow.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hegel_run_case_report(
+    ctx: *mut HegelContext,
+    run: *mut HegelRun,
+    out_report: *mut hegel_bytes_t,
+) -> hegel_result_t {
+    clear_last_error(ctx);
+    let Some(run) = (unsafe { run.as_mut() }) else {
+        set_last_error(ctx, "hegel_run_case_report: run pointer is null");
+        return HEGEL_E_INVALID_HANDLE;
+    };
+    if out_report.is_null() {
+        set_last_error(ctx, "hegel_run_case_report: out parameter is null");
+        return HEGEL_E_INVALID_ARG;
+    }
+    run.report = run.exchange.take_report();
+    let (data, len, rc) = match &run.report {
+        Some(report) => (report.as_ptr(), report.len(), HEGEL_OK),
+        None => (ptr::null(), 0, HEGEL_E_NOT_FOUND),
+    };
+    unsafe { *out_report = hegel_bytes_t { data, len } };
+    rc
 }
 
 /// Resume the engine until it offers the next test case (`Pending`) or the

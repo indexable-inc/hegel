@@ -150,6 +150,11 @@ mod drift {
             HEGEL_E_CONCURRENT_USE,
             HEGEL_E_RETRY,
             HEGEL_E_NOT_FOUND,
+            HEGEL_E_NEEDS_PROPOSAL,
+        }
+        hegel_tail_t {
+            HEGEL_TAIL_RANDOM,
+            HEGEL_TAIL_SIMPLEST,
         }
         hegel_status_t {
             HEGEL_STATUS_VALID,
@@ -211,6 +216,7 @@ mod drift {
 
     assert_struct_mirrors! {
         hegel_string_t { data, len }
+        hegel_bytes_t { data, len }
         hegel_date_t { year, month, day }
         hegel_time_t { hour, minute, second, nanosecond }
         hegel_datetime_t { date, time }

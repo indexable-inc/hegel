@@ -19,6 +19,7 @@ pub(crate) mod sys;
 use self::sys as hegel_c;
 
 use crate::control::hegel_internal_error;
+use crate::explore::{Next, Tail};
 use crate::runner::{
     Backend, Database, HealthCheck, NondeterminismStrictness, Phase, Settings, TestLocation,
     Verbosity,
@@ -484,6 +485,14 @@ fn output_args(
     }
 }
 
+/// What a run under external generation does next: run a test case, ask
+/// for a proposal, or nothing (it finished).
+pub(crate) enum Step {
+    Case(CTestCase),
+    NeedsProposal,
+    Finished,
+}
+
 /// Owns a `*mut HegelRun` and frees it on drop (which aborts and joins the
 /// engine worker if the run was not drained to completion).
 pub(crate) struct RunHandle {
@@ -503,6 +512,23 @@ impl RunHandle {
         settings: &SettingsHandle,
         sink: Option<&OutputSink>,
     ) -> Result<Self, String> {
+        Self::start_exploring(settings, sink, false)
+    }
+
+    /// [`start`](Self::start) for a run under external generation
+    /// (`hegel_run_start_external`), driven with [`step`](Self::step).
+    pub(crate) fn start_external(
+        settings: &SettingsHandle,
+        sink: Option<&OutputSink>,
+    ) -> Result<Self, String> {
+        Self::start_exploring(settings, sink, true)
+    }
+
+    fn start_exploring(
+        settings: &SettingsHandle,
+        sink: Option<&OutputSink>,
+        external: bool,
+    ) -> Result<Self, String> {
         let output = sink.map(|s| Box::into_raw(Box::new(s.clone())));
         let (callback, user_data) = output_args(output.map(|p| p.cast_const()));
         let mut raw: *mut hegel_c::HegelRun = ptr::null_mut();
@@ -511,7 +537,17 @@ impl RunHandle {
         // pointee outlives the engine's emissions) is upheld by holding the
         // sink box in `output` until Drop, after the worker is joined.
         let rc = with_context(|ctx| unsafe {
-            hegel_c::hegel_run_start(ctx, settings.as_ptr(), callback, user_data, &mut raw)
+            if external {
+                hegel_c::hegel_run_start_external(
+                    ctx,
+                    settings.as_ptr(),
+                    callback,
+                    user_data,
+                    &mut raw,
+                )
+            } else {
+                hegel_c::hegel_run_start(ctx, settings.as_ptr(), callback, user_data, &mut raw)
+            }
         });
         // Construct the handle before checking rc so the error path (raw is
         // still null, which hegel_run_free accepts) releases the sink box.
@@ -569,6 +605,80 @@ impl RunHandle {
         } else {
             Some(CTestCase { raw })
         }
+    }
+
+    /// [`next_test_case`](Self::next_test_case) for a run under external
+    /// generation, where the engine can instead ask for a proposal.
+    pub(crate) fn step(&self) -> Step {
+        let mut raw: *mut hegel_c::HegelTestCase = ptr::null_mut();
+        // SAFETY: as in `next_test_case`.
+        let rc =
+            with_context(|ctx| unsafe { hegel_c::hegel_next_test_case(ctx, self.raw, &mut raw) });
+        if rc == hegel_result_t::HEGEL_E_NEEDS_PROPOSAL {
+            return Step::NeedsProposal;
+        }
+        require_ok(rc);
+        if raw.is_null() {
+            Step::Finished
+        } else {
+            Step::Case(CTestCase { raw })
+        }
+    }
+
+    /// Answer the engine's request for a proposal (`hegel_run_propose`, or
+    /// `hegel_run_end_generation` for [`Next::Done`]).
+    pub(crate) fn propose(&self, next: &Next) {
+        let rc = match next {
+            Next::Run(proposal) => {
+                let prefix = crate::explore::encode_choices(&proposal.prefix);
+                let (tail, seed) = match proposal.tail {
+                    Tail::Random { seed } => (hegel_c::hegel_tail_t::HEGEL_TAIL_RANDOM, seed),
+                    Tail::Simplest => (hegel_c::hegel_tail_t::HEGEL_TAIL_SIMPLEST, 0),
+                };
+                let prefix = hegel_c::hegel_bytes_t {
+                    data: prefix.as_ptr(),
+                    len: prefix.len(),
+                };
+                // SAFETY: self.raw is a live run handle; the prefix bytes
+                // outlive the call, which copies them.
+                with_context(|ctx| unsafe {
+                    hegel_c::hegel_run_propose(
+                        ctx,
+                        self.raw,
+                        proposal.id,
+                        prefix,
+                        tail as u32,
+                        seed,
+                    )
+                })
+            }
+            // SAFETY: self.raw is a live run handle.
+            Next::Done => {
+                with_context(|ctx| unsafe { hegel_c::hegel_run_end_generation(ctx, self.raw) })
+            }
+        };
+        require_ok(rc);
+    }
+
+    /// The report of the last proposed case to run, if it has not been
+    /// taken yet.
+    pub(crate) fn take_case_report(&self) -> Option<Vec<u8>> {
+        let mut report = hegel_c::hegel_bytes_t {
+            data: ptr::null(),
+            len: 0,
+        };
+        // SAFETY: self.raw is a live run handle; the report borrows the run
+        // until the next call, and is copied out before then.
+        let rc = with_context(|ctx| unsafe {
+            hegel_c::hegel_run_case_report(ctx, self.raw, &mut report)
+        });
+        if rc == hegel_result_t::HEGEL_E_NOT_FOUND {
+            return None;
+        }
+        require_ok(rc);
+        // SAFETY: on success the engine filled `report` with a live,
+        // non-empty buffer of `len` bytes.
+        Some(unsafe { std::slice::from_raw_parts(report.data, report.len) }.to_vec())
     }
 
     /// Read the aggregate result as an owned snapshot, independent of the

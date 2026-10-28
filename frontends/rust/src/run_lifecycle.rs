@@ -22,7 +22,8 @@ use crate::control::{
     AssumeFailed, InternalError, InvalidArgument, LoopDone, StopTest, currently_in_test_context,
     hegel_internal_error, with_test_context,
 };
-use crate::ffi::{CTestCase, RunHandle, SettingsHandle};
+use crate::explore::Source;
+use crate::ffi::{CTestCase, RunHandle, SettingsHandle, Step};
 use crate::runner::{Settings, TestLocation, Verbosity};
 use crate::test_case::{RunOutput, TestCase};
 
@@ -530,11 +531,15 @@ fn store_capture(
 /// run-level error — a failed health check, a nondeterminism abort under
 /// `error` strictness, an engine panic — surfaces with the engine's own
 /// message instead of the `Property test failed:` framing.
+///
+/// With a `source`, the run is under external generation: its generation
+/// cases come from `source`, which observes each one's report.
 pub(crate) fn drive<F>(
     test_fn: F,
     settings: &Settings,
     database_key: Option<&str>,
     test_location: Option<&TestLocation>,
+    source: Option<&mut dyn Source>,
 ) where
     F: FnMut(TestCase),
 {
@@ -543,16 +548,52 @@ pub(crate) fn drive<F>(
     let output = RunOutput::resolve();
 
     let c_settings = SettingsHandle::build(settings, database_key, test_location);
-    let run = match RunHandle::start(&c_settings, output.sink()) {
-        Ok(run) => run,
-        Err(message) => panic!("{message}"), // nocov
+    let Some(source) = source else {
+        let run = match RunHandle::start(&c_settings, output.sink()) {
+            Ok(run) => run,
+            Err(message) => panic!("{message}"), // nocov
+        };
+        drive_run(
+            &run,
+            || run.next_test_case(),
+            &mut test_fn,
+            settings,
+            &output,
+            None,
+        );
+        return;
     };
+    let run = RunHandle::start_external(&c_settings, output.sink())
+        .unwrap_or_else(|message| panic!("{message}"));
+    drive_run(
+        &run,
+        || next_external_case(&run, source),
+        &mut test_fn,
+        settings,
+        &output,
+        None,
+    );
+}
 
-    drive_run(run, &mut test_fn, settings, &output, None);
+/// The next test case of a run under external generation, answering each
+/// proposal request from `source` and handing it each case report as soon
+/// as the engine posts it.
+fn next_external_case(run: &RunHandle, source: &mut dyn Source) -> Option<CTestCase> {
+    loop {
+        let step = run.step();
+        if let Some(report) = run.take_case_report() {
+            source.observe(&crate::explore::decode_report(&report));
+        }
+        match step {
+            Step::Case(case) => return Some(case),
+            Step::NeedsProposal => run.propose(&source.next()),
+            Step::Finished => return None,
+        }
+    }
 }
 
 /// The shared pump-and-report loop behind [`drive`] and
-/// [`drive_blob_replay`]: pull every test case off `run`, capture report
+/// [`drive_blob_replay`]: pull every test case off `run` with `next_case`, capture report
 /// material per origin, then act on the run's verdict. A passing run
 /// returns — unless `stale_message` is set (a blob replay), where a pass
 /// means the blob did not reproduce and panics with that message.
@@ -562,7 +603,8 @@ pub(crate) fn drive<F>(
 /// (pinned by `test_output`'s backtrace tests).
 #[inline(always)]
 fn drive_run<F: FnMut(TestCase)>(
-    run: RunHandle,
+    run: &RunHandle,
+    mut next_case: impl FnMut() -> Option<CTestCase>,
     test_fn: &mut F,
     settings: &Settings,
     output: &RunOutput,
@@ -572,7 +614,7 @@ fn drive_run<F: FnMut(TestCase)>(
     let quiet = verbosity == Verbosity::Quiet;
     let verbose = matches!(verbosity, Verbosity::Verbose | Verbosity::Debug);
     let mut captured: HashMap<String, CapturedReport> = HashMap::new();
-    while let Some(c_tc) = run.next_test_case() {
+    while let Some(c_tc) = next_case() {
         let buffer: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let live: Option<RunOutput> = if verbose { Some(output.clone()) } else { None };
         let case_sink: Option<crate::test_case::OutputSink> = if quiet {
@@ -693,7 +735,8 @@ pub(crate) fn drive_blob_replay<F>(
     let c_settings = SettingsHandle::build(settings, database_key, test_location);
     let run = RunHandle::start_blob(&c_settings, blob, output.sink());
     drive_run(
-        run,
+        &run,
+        || run.next_test_case(),
         &mut test_fn,
         settings,
         &output,
