@@ -15,7 +15,7 @@ jobs:
   # then the release-profile build and tests opam-repo-ci would run.
   test:
     name: test
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
@@ -62,7 +62,7 @@ jobs:
   # core/async depopts).
   compat:
     name: compat (ocaml ${{ matrix.ocaml }})
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     strategy:
@@ -107,7 +107,7 @@ jobs:
   # The API reference (odoc), with warnings as errors.
   docs:
     name: docs
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
@@ -133,6 +133,8 @@ jobs:
   # Cross-platform check: build the engine and run the suite on macOS.
   smoke:
     name: smoke (macos)
+    # Disabled: GitHub-hosted runners are unavailable to this private fork, and ix runners are Linux only.
+    if: false
     runs-on: macos-latest
     permissions:
       contents: read
@@ -161,7 +163,7 @@ jobs:
   # run. The switch is built from the OxCaml opam repository and cached.
   oxcaml:
     name: test (oxcaml)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:

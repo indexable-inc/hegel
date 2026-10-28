@@ -10,7 +10,7 @@ jobs:
   check-release:
     name: check release
     if: "!contains(github.event.pull_request.labels.*.name, 'skip release')"
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
