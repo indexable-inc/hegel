@@ -28,8 +28,9 @@ jobs:
         run: cargo test -p hegeltest-c --target wasm32-unknown-unknown --lib --no-run
       # Check, not link: wasip2 links a component, and wasm-component-ld
       # refuses the raw `hegel_host` core imports, which have no WIT interface.
-      - name: Check the library and its tests for WASI
-        run: cargo check -p hegeltest-c --target wasm32-wasip2 --lib --tests
+      # The integration tests load the native library, so only the lib's unit tests.
+      - name: Check the library's unit tests for WASI
+        run: cargo check -p hegeltest-c --target wasm32-wasip2 --lib --profile test
       - name: Build the WebAssembly artifact
         run: cargo build -p hegeltest-c --release --target wasm32-unknown-unknown
       - name: Build the WebAssembly static archive
