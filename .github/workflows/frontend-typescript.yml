@@ -15,7 +15,7 @@ jobs:
   # scripts, and the packed package bundled four ways and run in Chromium.
   test:
     name: test
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -48,7 +48,7 @@ jobs:
   # The built package on the oldest supported Node and on Bun and Deno.
   smoke:
     name: smoke (${{ matrix.runtime }} ${{ matrix.version }})
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     strategy:
@@ -108,7 +108,7 @@ jobs:
   # The API reference (typedoc), with warnings as errors.
   docs:
     name: docs
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:

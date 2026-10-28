@@ -15,7 +15,7 @@ jobs:
   # then the release-profile build and tests opam-repo-ci would run.
   test:
     name: test
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -62,7 +62,7 @@ jobs:
   # core/async depopts).
   compat:
     name: compat (ocaml ${{ matrix.ocaml }})
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     strategy:
@@ -107,7 +107,7 @@ jobs:
   # The API reference (odoc), with warnings as errors.
   docs:
     name: docs
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -163,7 +163,7 @@ jobs:
   # run. The switch is built from the OxCaml opam repository and cached.
   oxcaml:
     name: test (oxcaml)
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:

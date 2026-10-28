@@ -11,7 +11,7 @@ permissions: {}
 jobs:
   test-wasm:
     name: test-wasm
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -59,7 +59,7 @@ jobs:
     # tests on each OS. The example C programs are bash-driven and only run
     # on Unix runners.
     name: test-c-bindings (${{ matrix.os }})
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     strategy:
@@ -91,7 +91,7 @@ jobs:
     # and exports only hegel_* symbols, and runs the smoke tests, including
     # the dlopen/dlclose replay test, against that build.
     name: test-c-runtime
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -106,7 +106,7 @@ jobs:
 
   lark:
     name: lark
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -125,7 +125,7 @@ jobs:
   # the native engine. See the `check-miri` recipe in libhegel/justfile.
   miri:
     name: miri
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:

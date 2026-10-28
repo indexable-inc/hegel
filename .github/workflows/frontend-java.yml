@@ -15,7 +15,7 @@ jobs:
   # The whole reactor (FFM needs JDK 22+) with the 100% coverage gate.
   test:
     name: test (java ${{ matrix.java-version }})
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     strategy:
@@ -41,7 +41,7 @@ jobs:
   # hegel-lowlevel and hegel-jna on the JDKs the JNA artifact supports.
   test-jna:
     name: test hegel-jna (java ${{ matrix.java-version }})
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     strategy:
@@ -92,7 +92,7 @@ jobs:
   # The API reference (javadoc), with doclint on.
   docs:
     name: docs
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
