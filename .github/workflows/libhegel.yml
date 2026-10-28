@@ -21,11 +21,13 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: llvm-tools-preview
-          targets: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown wasm32-wasip2
       - name: Check the release toolchain
         run: python libhegel/scripts/check-release-rust.py
       - name: Compile the test suite for WebAssembly
         run: cargo test -p hegeltest-c --target wasm32-unknown-unknown --lib --no-run
+      - name: Compile the test suite for WASI
+        run: cargo test -p hegeltest-c --target wasm32-wasip2 --lib --no-run
       - name: Build the WebAssembly artifact
         run: cargo build -p hegeltest-c --release --target wasm32-unknown-unknown
       - name: Build the WebAssembly static archive

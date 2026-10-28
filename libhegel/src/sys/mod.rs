@@ -8,9 +8,9 @@
 //! module. No other module may touch the OS directly, and no other module
 //! may assume an OS exists: every capability here is either fallible
 //! ([`Result`]/[`Option`], which callers can disable, fall back from, or
-//! surface as an error) or best-effort ([`stderr_line`]). Browser
-//! WebAssembly obtains the capabilities it can use through explicit host
-//! imports.
+//! surface as an error) or best-effort ([`stderr_line`]). WebAssembly,
+//! browser or WASI, obtains the capabilities it can use through explicit
+//! host imports.
 //!
 //! The per-target backends deliberately avoid process-global runtime state:
 //! `rustix` on Unix (raw syscalls on Linux, so no libc thread-locals) and
@@ -38,7 +38,10 @@ mod imp;
 #[path = "windows.rs"]
 mod imp;
 
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+// Every non-Unix WebAssembly target, WASI included: the backend needs only the
+// two `hegel_host` imports, which a WASI embedder provides like a browser does.
+// Emscripten reports `unix` and keeps the Unix backend.
+#[cfg(all(target_family = "wasm", not(unix)))]
 #[path = "wasm.rs"]
 mod imp;
 
