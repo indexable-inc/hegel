@@ -11,7 +11,7 @@ permissions: {}
 jobs:
   test:
     name: test (${{ matrix.os }}, py${{ matrix.python }})
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     defaults:
@@ -42,7 +42,7 @@ jobs:
   # Build the documentation as Read the Docs does, with warnings as errors.
   docs:
     name: docs
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -78,8 +78,8 @@ jobs:
       matrix:
         include:
           # Linux only: GitHub-hosted runners are unavailable to this private fork, and ix runners are Linux only.
-          - { platform: linux-amd64,   runner: [self-hosted, ix] }
-          - { platform: linux-arm64,   runner: [self-hosted, ix, arm64] }
+          - { platform: linux-amd64,   runner: ix }
+          - { platform: linux-arm64,   runner: [ix, arm64] }
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

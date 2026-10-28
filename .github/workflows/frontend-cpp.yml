@@ -16,7 +16,7 @@ jobs:
   # compiler and standard library.
   test:
     name: test (${{ matrix.compiler }}${{ matrix.stdlib && format(' with {0}', matrix.stdlib) || '' }})
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     strategy:
@@ -70,7 +70,7 @@ jobs:
   # tests switched on.
   consumer:
     name: consumer
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -85,7 +85,7 @@ jobs:
   # a strict C++17 project.
   cxx17:
     name: cxx17
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -101,7 +101,7 @@ jobs:
   # frontends/cpp/coverage-ratchet.json.
   coverage:
     name: coverage
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -122,7 +122,7 @@ jobs:
   # address+undefined and thread sanitizer builds of the suite.
   sanitizers:
     name: sanitizers
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -144,7 +144,7 @@ jobs:
   # project needs cargo even though the docs target never builds the engine.
   docs:
     name: docs
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
@@ -162,7 +162,7 @@ jobs:
   # libhegel by the root flake. nixfmt runs in ci.yml's nix job.
   nix:
     name: nix
-    runs-on: [self-hosted, ix]
+    runs-on: ix
     permissions:
       contents: read
     steps:
