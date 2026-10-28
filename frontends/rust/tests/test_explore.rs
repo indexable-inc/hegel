@@ -247,7 +247,7 @@ fn generation_stops_at_the_test_case_budget() {
 
 fn failing(tc: TestCase) {
     let n: i64 = tc.draw(gs::integers::<i64>().min_value(0).max_value(1_000_000));
-    assert!(n < 1000, "n = {n}");
+    assert!(n < 1000);
 }
 
 #[test]
@@ -260,7 +260,7 @@ fn a_failing_external_case_is_shrunk_and_saved() {
             let n: i64 = tc.draw(gs::integers::<i64>().min_value(0).max_value(1_000_000));
             if n >= 1000 {
                 *last.lock().unwrap() = Some(n);
-                panic!("n = {n}");
+                panic!("n is too large");
             }
         }
     };
