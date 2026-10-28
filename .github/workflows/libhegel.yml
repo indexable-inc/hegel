@@ -11,7 +11,7 @@ permissions: {}
 jobs:
   test-wasm:
     name: test-wasm
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
@@ -59,13 +59,14 @@ jobs:
     # tests on each OS. The example C programs are bash-driven and only run
     # on Unix runners.
     name: test-c-bindings (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        # Linux only: GitHub-hosted runners are unavailable to this private fork, and ix runners are Linux only.
+        os: [linux]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -90,7 +91,7 @@ jobs:
     # and exports only hegel_* symbols, and runs the smoke tests, including
     # the dlopen/dlclose replay test, against that build.
     name: test-c-runtime
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
@@ -105,7 +106,7 @@ jobs:
 
   lark:
     name: lark
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
@@ -124,7 +125,7 @@ jobs:
   # the native engine. See the `check-miri` recipe in libhegel/justfile.
   miri:
     name: miri
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:

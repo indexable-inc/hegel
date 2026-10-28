@@ -31,7 +31,7 @@ jobs:
   # skipped reusable workflow reports no check runs at all.
   changes:
     name: changes
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       pull-requests: read
     outputs:
@@ -92,7 +92,7 @@ jobs:
   # a packaging dry run. Cheap enough to run on every change.
   lint:
     name: lint
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
@@ -212,7 +212,7 @@ jobs:
     name: test-minimal-versions
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
@@ -231,8 +231,9 @@ jobs:
   coverage:
     name: coverage
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    # Disabled: needs the HEGEL_RELEASE_APP_PRIVATE_KEY App secret, which this fork does not have.
+    if: false
+    runs-on: [self-hosted, ix]
     permissions:
       contents: write  # needed for ratchet auto-update
       pull-requests: write  # needed for creating PRs on main
@@ -308,7 +309,7 @@ jobs:
     name: nix
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
@@ -330,7 +331,7 @@ jobs:
     name: ci-ok
     if: always()
     needs: [lint, libhegel, rust, python, typescript, cpp, java, ocaml, test-minimal-versions, coverage, nix]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions: {}
     steps:
       - name: Check dependency results

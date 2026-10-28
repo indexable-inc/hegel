@@ -11,13 +11,14 @@ permissions: {}
 jobs:
   test:
     name: test (${{ matrix.rust }}${{ matrix.os == 'windows-latest' && ', windows' || '' }})
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Linux only: GitHub-hosted runners are unavailable to this private fork, and ix runners are Linux only.
+        os: [linux]
         # The first entry is the MSRV; bumping it means bumping
         # frontends/rust/Cargo.toml, frontends/rust/macros/Cargo.toml and
         # libhegel/Cargo.toml together.
@@ -34,13 +35,14 @@ jobs:
 
   test-all-features:
     name: test-all-features (${{ matrix.rust }}${{ matrix.os == 'windows-latest' && ', windows' || '' }})
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Linux only: GitHub-hosted runners are unavailable to this private fork, and ix runners are Linux only.
+        os: [linux]
         rust: ["1.86", stable]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -54,7 +56,7 @@ jobs:
 
   compile-examples:
     name: compile-examples (${{ matrix.rust }})
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     strategy:
@@ -75,7 +77,7 @@ jobs:
 
   docs:
     name: docs
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
@@ -95,7 +97,7 @@ jobs:
   # the `check-miri` recipe in frontends/rust/justfile.
   miri:
     name: miri
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ix]
     permissions:
       contents: read
     steps:
