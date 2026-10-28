@@ -83,7 +83,10 @@ macro_rules! for_each_hegel_fn {
             fn hegel_recursion_retry(ctx: *mut HegelContext, tc: *mut HegelTestCase, recursion: *mut HegelRecursion) -> hegel_result_t;
             fn hegel_reflow_options_free(ctx: *mut HegelContext, options: *mut HegelReflowOptions) -> hegel_result_t;
             fn hegel_reflow_options_new(ctx: *mut HegelContext, out_options: *mut *mut HegelReflowOptions) -> hegel_result_t;
+            fn hegel_run_case_report(ctx: *mut HegelContext, run: *mut HegelRun, out_report: *mut hegel_bytes_t) -> hegel_result_t;
+            fn hegel_run_end_generation(ctx: *mut HegelContext, run: *mut HegelRun) -> hegel_result_t;
             fn hegel_run_free(ctx: *mut HegelContext, run: *mut HegelRun) -> hegel_result_t;
+            fn hegel_run_propose(ctx: *mut HegelContext, run: *mut HegelRun, id: u64, prefix: hegel_bytes_t, tail: u32, seed: u64) -> hegel_result_t;
             fn hegel_run_result(ctx: *mut HegelContext, run: *mut HegelRun, out_result: *mut *mut HegelRunResult) -> hegel_result_t;
             fn hegel_run_result_error(ctx: *mut HegelContext, r: *const HegelRunResult, out_error: *mut *const hegel_string_t) -> hegel_result_t;
             fn hegel_run_result_error_kind(ctx: *mut HegelContext, r: *const HegelRunResult, out_kind: *mut hegel_run_error_kind_t, out_health_check: *mut u32) -> hegel_result_t;
@@ -93,6 +96,7 @@ macro_rules! for_each_hegel_fn {
             fn hegel_run_result_status(ctx: *mut HegelContext, r: *const HegelRunResult, out_status: *mut hegel_run_status_t) -> hegel_result_t;
             fn hegel_run_start(ctx: *mut HegelContext, settings: *const HegelSettings, callback: hegel_output_callback_t, user_data: *mut c_void, out_run: *mut *mut HegelRun) -> hegel_result_t;
             fn hegel_run_start_blob(ctx: *mut HegelContext, settings: *const HegelSettings, blob: hegel_string_t, callback: hegel_output_callback_t, user_data: *mut c_void, out_run: *mut *mut HegelRun) -> hegel_result_t;
+            fn hegel_run_start_external(ctx: *mut HegelContext, settings: *const HegelSettings, callback: hegel_output_callback_t, user_data: *mut c_void, out_run: *mut *mut HegelRun) -> hegel_result_t;
             fn hegel_set_default_profile(ctx: *mut HegelContext, name: hegel_string_t) -> hegel_result_t;
             fn hegel_set_unicode_version(ctx: *mut HegelContext, version: hegel_string_t) -> hegel_result_t;
             fn hegel_settings_free(ctx: *mut HegelContext, s: *mut HegelSettings) -> hegel_result_t;

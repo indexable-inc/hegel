@@ -76,6 +76,7 @@ pub(crate) enum hegel_result_t {
     HEGEL_E_CONCURRENT_USE = -9,
     HEGEL_E_RETRY = -10,
     HEGEL_E_NOT_FOUND = -11,
+    HEGEL_E_NEEDS_PROPOSAL = -12,
 }
 
 #[repr(C)]
@@ -85,6 +86,20 @@ pub(crate) enum hegel_status_t {
     HEGEL_STATUS_INVALID = 1,
     HEGEL_STATUS_OVERRUN = 2,
     HEGEL_STATUS_INTERESTING = 3,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub(crate) enum hegel_tail_t {
+    HEGEL_TAIL_RANDOM = 1,
+    HEGEL_TAIL_SIMPLEST = 2,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct hegel_bytes_t {
+    pub data: *const u8,
+    pub len: usize,
 }
 
 #[repr(C)]

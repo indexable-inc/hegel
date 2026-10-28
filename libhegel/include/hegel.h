@@ -198,9 +198,17 @@ typedef enum {
     HEGEL_E_RETRY = -10,
     /*
      There is nothing at the index asked for:
-     `hegel_grammar_builder_file` past the end of the list of files.
+     `hegel_grammar_builder_file` past the end of the list of files; or
+     nothing to read: `hegel_run_case_report` with no new report.
      */
     HEGEL_E_NOT_FOUND = -11,
+    /*
+     From `hegel_next_test_case` on a run started with
+     `hegel_run_start_external`: the engine wants its next generation case.
+     Supply it with `hegel_run_propose`, or end generation with
+     `hegel_run_end_generation`, then call `hegel_next_test_case` again.
+     */
+    HEGEL_E_NEEDS_PROPOSAL = -12,
 } hegel_result_t;
 
 /*
@@ -433,6 +441,22 @@ typedef enum {
      */
     HEGEL_STATUS_INTERESTING = 3,
 } hegel_status_t;
+
+/*
+ How the test case built from a proposal draws past its prefix. Passed to
+ `hegel_run_propose`.
+ */
+typedef enum {
+    /*
+     At random, from a generator seeded with the proposal's seed, so the
+     same proposal draws the same tail whatever ran before it.
+     */
+    HEGEL_TAIL_RANDOM = 1,
+    /*
+     Every draw at its simplest value.
+     */
+    HEGEL_TAIL_SIMPLEST = 2,
+} hegel_tail_t;
 
 /*
  Opaque handle to an engine-managed variable-length collection.
@@ -744,6 +768,16 @@ typedef struct {
  the call.
  */
 typedef void (*hegel_output_callback_t)(void *user_data, const char *line, size_t len);
+
+/*
+ A borrowed byte sequence of `len` bytes. Zero length accepts any
+ pointer, including NULL. As an input, the caller keeps the bytes alive
+ for the call; as an output, the bytes borrow their documented owner.
+ */
+typedef struct {
+    const uint8_t *data;
+    size_t len;
+} hegel_bytes_t;
 
 /*
  An engine-allocated byte buffer returned by `hegel_generate_bytes`.
@@ -1407,6 +1441,36 @@ hegel_result_t hegel_run_start(hegel_context_t *ctx,
                                hegel_run_t **out_run);
 
 /*
+ Like `hegel_run_start`, but the run's generation phase takes each test
+ case from the caller as data instead of drawing it. Everything else is
+ as `hegel_run_start`: database replay, the simplest test case,
+ shrinking every failure found, and the database.
+
+ When the engine wants its next generation case, `hegel_next_test_case`
+ returns `HEGEL_E_NEEDS_PROPOSAL` and no test case. Answer with
+ `hegel_run_propose` (the case, as a choice prefix plus how to draw past
+ it) or `hegel_run_end_generation`, then call `hegel_next_test_case`
+ again. The engine's own exploration passes (targeting, span mutation,
+ grammar mutation) do not run. Generation also ends, without asking,
+ where `hegel_run_start`'s would: at the `test_cases` budget, or after a
+ failure when `stop_on_first_failure` is set. Health checks apply to
+ proposed cases as to drawn ones: rejecting too many of them, or too many
+ overrunning or running too slowly, fails the run unless that health
+ check is suppressed.
+
+ After running a case built from a proposal, the engine makes that case's
+ report available to `hegel_run_case_report`, by the time
+ `hegel_next_test_case` next returns.
+
+ Parameters and return values: as `hegel_run_start`.
+ */
+hegel_result_t hegel_run_start_external(hegel_context_t *ctx,
+                                        const hegel_settings_t *settings,
+                                        hegel_output_callback_t callback,
+                                        void *user_data,
+                                        hegel_run_t **out_run);
+
+/*
  Like `hegel_run_start`, but the run replays a reproduce blob instead of
  exploring. Both blob kinds replay exactly until a replay fails, under a
  bounded budget: a deterministic blob replays its choices up to 4 times,
@@ -1444,7 +1508,10 @@ hegel_result_t hegel_run_start_blob(hegel_context_t *ctx,
  Returns `HEGEL_OK`, including at normal completion, where
  `*out_test_case` is NULL and you should call `hegel_run_result`.
  `HEGEL_E_NOT_COMPLETE` if the previous test case was not marked
- complete.
+ complete, or if the engine is still waiting for the proposal it asked
+ for. On a run from `hegel_run_start_external`,
+ `HEGEL_E_NEEDS_PROPOSAL` (with `*out_test_case` NULL) when the engine
+ wants its next generation case.
 
  The handle is owned by the caller and must be released with
  `hegel_test_case_free`.
@@ -1452,6 +1519,90 @@ hegel_result_t hegel_run_start_blob(hegel_context_t *ctx,
 hegel_result_t hegel_next_test_case(hegel_context_t *ctx,
                                     hegel_run_t *run,
                                     hegel_test_case_t **out_test_case);
+
+/*
+ Answer the engine's request for its next generation case (see
+ `hegel_run_start_external`) with a test case as data.
+
+ Parameters:
+ `id`: Echoed in this case's report.
+ `prefix`: The case's first choices, in the encoding of the engine's
+   example database: a u32 count, then per choice a one-byte type tag
+   and its value (all little-endian). Tag 0 is an integer: the byte 10,
+   a u32 length and that many two's-complement bytes. Tag 1 is a
+   boolean: one byte, 0 or 1. Tag 2 is a float: its 8-byte IEEE-754 bit
+   pattern. Tag 3 is bytes: a u32 length and the bytes. Tag 4 is a
+   string: a u32 codepoint count and a u32 per codepoint. Tag 5 is the
+   choices of a cloned test case, recursively in this same layout. Each
+   draw takes the next choice in order. A choice that does not fit its
+   draw (another type, or out of bounds) is replaced by a value of the
+   draw's that does.
+ `tail`: A `hegel_tail_t`: how the case draws past the prefix.
+ `seed`: Seeds the tail under `HEGEL_TAIL_RANDOM`; ignored otherwise.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` for a prefix that does not
+ decode, an unknown `tail`, or a run that is not waiting for a proposal.
+ */
+hegel_result_t hegel_run_propose(hegel_context_t *ctx,
+                                 hegel_run_t *run,
+                                 uint64_t id,
+                                 hegel_bytes_t prefix,
+                                 uint32_t tail,
+                                 uint64_t seed);
+
+/*
+ Answer the engine's request for its next generation case (see
+ `hegel_run_start_external`) by ending generation. The run goes on to
+ shrink what it found and finishes as usual.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_INVALID_ARG` for a run that is not
+ waiting for a proposal.
+ */
+hegel_result_t hegel_run_end_generation(hegel_context_t *ctx, hegel_run_t *run);
+
+/*
+ Read the report of the most recent test case built from a proposal
+ (see `hegel_run_start_external`), once.
+
+ Parameters:
+ `out_report`: Receives the report, borrowed from the run until the next
+   `hegel_run_case_report` call on it or `hegel_run_free`.
+
+ Returns `HEGEL_OK`, or `HEGEL_E_NOT_FOUND` (with `*out_report` empty)
+ when no case has been reported since the last call. A report the caller
+ does not read before the next proposed case finishes is replaced.
+
+ The report is versioned binary, all integers little-endian. An `int` is
+ a u32 byte count and the value's two's-complement bytes, a `str` a u32
+ byte count and UTF-8, a `size` a u64, and a float its IEEE-754 bit
+ pattern:
+
+ ```text
+ report  = version:u8(=1) id:u64 status:u8 origin:opt<str> stream
+           targets:u32 (label:str score:f64)*    -- sorted by label
+           events:u32 (label:str value:opt<f64>)* -- in recording order
+ status  = 0 valid | 1 invalid | 2 overrun | 3 interesting
+ opt<T>  = 0 | 1 T
+ stream  = nodes:u32 node* spans:u32 span*
+ node    = tag:u8 forced:u8 body
+   tag 0 integer: min:int max:int shrink_towards:int value:int
+   tag 1 boolean: p:f64 value:u8
+   tag 2 float:   min:f64 max:f64 allow_nan:u8 allow_infinity:u8
+                  smallest_nonzero_magnitude:f64 value:f64
+   tag 3 bytes:   min_size:size max_size:size len:u32 byte*
+   tag 4 string:  min_size:size max_size:size constrained:u8
+                  intervals:u32 (start:u32 end:u32)* len:u32 codepoint:u32*
+   tag 5 clone:   stream
+ span    = start:u64 end:u64 label:u64 depth:u32 parent:opt<u64>
+           discarded:u8
+ ```
+
+ A string's `constrained` is 1 when a regex or grammar constrains it
+ beyond its alphabet, whose inclusive codepoint ranges follow.
+ */
+hegel_result_t hegel_run_case_report(hegel_context_t *ctx,
+                                     hegel_run_t *run,
+                                     hegel_bytes_t *out_report);
 
 /*
  Parameters:
