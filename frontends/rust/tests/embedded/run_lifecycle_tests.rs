@@ -232,7 +232,7 @@ fn run_case_capturing(
 /// Drive a real run of `body` and return the message it panics with.
 fn drive_panic_message(body: impl FnMut(TestCase), settings: &Settings) -> String {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        drive(body, settings, None, None)
+        drive(body, settings, None, None, None)
     }));
     let payload = result.expect_err("drive should panic on a failing run");
     payload
@@ -302,6 +302,7 @@ fn drive_passing_run_does_not_panic() {
             let _: i32 = tc.draw(gs::integers());
         },
         &test_settings(),
+        None,
         None,
         None,
     );

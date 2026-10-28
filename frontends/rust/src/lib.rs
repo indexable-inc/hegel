@@ -324,6 +324,7 @@ pub(crate) mod control;
 pub mod docs;
 #[doc(hidden)]
 pub mod explicit_test_case;
+pub mod explore;
 pub mod extras;
 pub(crate) mod ffi;
 pub mod generators;
