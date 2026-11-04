@@ -112,6 +112,8 @@ rand = { version = "0.10", optional = true }
 chrono = { version = "0.4.41", default-features = false, features = ["std"], optional = true }
 # opting out of bundled tz features
 jiff = { version = "0.2", default-features = false, features = ["std"], optional = true }
+# Deterministic simulation (`hegel::sim`, feature `sim`).
+hegel-sim = { version = "0.1.0", path = "../../sim/hegel-sim", features = ["sim"], optional = true }
 
 [dev-dependencies]
 regex = "1.0"
@@ -147,6 +149,10 @@ serde_json_raw_value = ["serde_json", "serde_json/raw_value"]
 # loading the libhegel shared library at runtime. Self-contained binaries, at
 # the cost of exposing the engine's entire dependency tree to your build.
 static-engine = ["dep:hegeltest-c", "hegeltest-c/std"]
+# Deterministic simulation testing: re-exports the `hegel-sim` facade and
+# driver as `hegel::sim`, with `TestCase` as its source of choices. See
+# docs/dst.md.
+sim = ["dep:hegel-sim"]
 
 
 [package.metadata.docs.rs]

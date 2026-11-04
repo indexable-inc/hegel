@@ -1,0 +1,22 @@
+[package]
+name = "hegel-sim"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Deterministic simulation for Hegel: std-compatible sync/thread/fs/time facades that a scheduler and a Linux kernel model drive under test"
+repository = "https://github.com/hegeldev/hegel"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Turn the facade into the simulated one: every item stays std-compatible and
+# behaves exactly like std outside a running simulation.
+sim = ["dep:hegel-sim-core", "dep:corosensei"]
+
+[dependencies]
+libc = "0.2"
+hegel-sim-core = { version = "0.1.0", path = "../core", optional = true }
+corosensei = { version = "0.3.4", optional = true }
