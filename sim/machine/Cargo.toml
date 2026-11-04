@@ -1,0 +1,17 @@
+[package]
+name = "hegel-sim-machine"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "One simulated machine (Hegel's Linux kernel model, PCT scheduler and virtual clock) as a wasm module a host drives through scalar exports"
+repository = "https://github.com/hegeldev/hegel"
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hegel-sim-core = { version = "0.1.0", path = "../core" }

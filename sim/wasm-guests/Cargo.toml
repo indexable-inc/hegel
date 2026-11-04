@@ -1,0 +1,15 @@
+# Guest programs for hegel-sim-wasm's tests: plain std Rust, built for
+# wasm32-wasip1. Their own workspace so the host workspace never builds them for
+# the host target.
+[workspace]
+
+[package]
+name = "hegel-sim-guests"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[profile.release]
+opt-level = 2
+debug = false

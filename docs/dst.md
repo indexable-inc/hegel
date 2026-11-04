@@ -2,7 +2,7 @@
 status: plan
 phases:
   phase-1-native: landed
-  phase-2a-wasm-asyncify: building
+  phase-2a-wasm-asyncify: landed (single-threaded programs)
   phase-2b-wasm-stack-switching: planned
   phase-3-validation: written, not run
 ---
@@ -433,7 +433,7 @@ holds almost nothing.
 ### Stack switching: one mode per run, chosen explicitly
 
 A coroutine's suspended stack must also live in memory the snapshot covers. Two modes, selected by
-`WasmConfig::stacks(StackMode::..)`; there is no fallback between them, and asking for a mode the host cannot do
+`WasmConfig::stacks` and `engine(StackMode::..)`; there is no fallback between them, and asking for a mode the host cannot do
 stops with an error that names the mode and the platform.
 
 - **2a: `StackMode::Asyncify`.** Binaryen's Asyncify pass (through the `wasm-opt` crate, which bundles binaryen)
@@ -508,8 +508,25 @@ may hold locks; macOS frameworks that refuse to run after fork must not be touch
 
 ### Measurements
 
-Recorded here as phase 2a lands: Asyncify's code-size and run-time overhead on the blaze-like workload, the cost
-per switch in each mode, and snapshot and restore cost per MB.
+Asyncify on the blaze-like workload (`sim/wasm-guests/src/bin/workload.rs`, n = 200000: string-keyed hash
+map, sort, BTreeMap, many small allocations, one file write), run by
+`cargo run --release -p hegel-sim-wasm --example asyncify_overhead -- <workload.wasm> <machine.wasm>`.
+Measured on 2026-11-04, aarch64 macOS, Wasmtime 38 with Cranelift, wasm-opt 116 (binaryen). Times are the
+median thread CPU time over 21 runs. Thread CPU time rather than wall time because the machine was shared
+(load average about 80), which made wall time swing by ±40%.
+
+| Module | Size | Time | vs `-O2` |
+|---|---|---|---|
+| raw `cargo build --release` output | 127849 B | | |
+| `wasm-opt -O2` | 86207 B | 91.5 ms | 1.00 |
+| `-O2` + Asyncify (the 2a pipeline), stub WASI that never switches | 133876 B | 104.0 ms | size 1.55, time 1.14 |
+| the prepared module run in a world (every syscall a switch point, kernel in its own module) | | 100.5 ms | 1.10 |
+
+So Asyncify costs about 14% of run time and 55% of code size on code that rarely switches. The world run differs
+from the stub run in its `random_get` bytes (drawn, so the hash map's seed and layout differ), which is within the
+noise. Cost per switch and snapshot cost per MB are not measured yet. The b1 wasm test gives a rough figure:
+6000 cases (3 seeds, buggy and fixed, each restoring a world of more than 2 MB from a snapshot, compacting, and
+recovering) run in 9 s with compiling included.
 
 ## Phase 3: validating the model against real kernels
 
@@ -539,6 +556,6 @@ state that needs it, and no observed state falls outside the model.
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | `hegel-sim-core` (kernel, PCT, clock, swarm, trace; builds for `wasm32-unknown-unknown`), `hegel-sim` facade and native driver with crash and restart, the oracle, native `fork()` snapshots, `hegeltest` `sim` feature, `hegel-sim-examples` with the six planted bugs (buggy caught, fixed passing) | landed |
-| 2a | `hegel-sim-machine` (the kernel as a wasm module), `hegel-sim-wasm` (Wasmtime host, atomic-yield instrumentation, Asyncify stack switching, WASI p1 over the machine), the snapshot manager (snapshot, fork N, diff, save), a planted-bug wasm example, Asyncify overhead measured | building |
+| 2a | `hegel-sim-machine` (the kernel as a wasm module), `hegel-sim-wasm` (Wasmtime host, atomic-yield instrumentation, Asyncify stack switching, WASI p1 over the machine), the snapshot manager (snapshot, fork N, diff, save), a planted-bug wasm example, Asyncify overhead measured | landed for single-threaded programs: b1 as a real `wasm32-wasip1` binary is caught and its fix passes, forked from one snapshot; threads (`wasm32-wasip1-threads`, shared memory, futex waits) and fd polling are left |
 | 2b | Stack switching from our Wasmtime fork (`indexable-inc/wasmtime`, branch `sim-stacks`) with continuation stacks in a snapshot-owned region | planned |
 | 3 | `sim/validation`: dm-log-writes recorder and crash-state replayer, model membership checker | written, not run |

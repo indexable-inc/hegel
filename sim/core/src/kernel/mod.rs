@@ -10,6 +10,7 @@
 mod buf;
 mod file;
 mod locks;
+pub mod wire;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
