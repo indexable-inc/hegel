@@ -11,7 +11,7 @@ permissions: {}
 jobs:
   test:
     name: test (${{ matrix.os }}, py${{ matrix.python }})
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     defaults:
@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux only: GitHub-hosted runners are unavailable to this private fork, and ix runners are Linux only.
+        # Linux only: GitHub-hosted runners were unavailable while this fork was private, and ix runners are Linux only; re-enable now that it is public.
         os: [linux]
         python: ["3.11", "3.12", "3.13", "3.14"]
     env:
@@ -42,7 +42,7 @@ jobs:
   # Build the documentation as Read the Docs does, with warnings as errors.
   docs:
     name: docs
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -67,7 +67,9 @@ jobs:
   # is not writable afterwards.
   package:
     name: package (${{ matrix.platform }})
-    runs-on: ${{ matrix.runner }}
+    # The ix labels (a JSON list) for trusted runs; a GitHub-hosted runner of
+    # the same architecture for pull requests from forks.
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON(matrix.ix) || matrix.hosted }}
     permissions:
       contents: read
     defaults:
@@ -77,9 +79,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux only: GitHub-hosted runners are unavailable to this private fork, and ix runners are Linux only.
-          - { platform: linux-amd64,   runner: ix }
-          - { platform: linux-arm64,   runner: [ix, arm64] }
+          # Linux only: GitHub-hosted runners were unavailable while this fork was private, and ix runners are Linux only; re-enable now that it is public.
+          - { platform: linux-amd64, ix: '["ix"]',          hosted: ubuntu-latest }
+          - { platform: linux-arm64, ix: '["ix", "arm64"]', hosted: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

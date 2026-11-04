@@ -15,7 +15,7 @@ jobs:
   # then the release-profile build and tests opam-repo-ci would run.
   test:
     name: test
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -62,7 +62,7 @@ jobs:
   # core/async depopts).
   compat:
     name: compat (ocaml ${{ matrix.ocaml }})
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -107,7 +107,7 @@ jobs:
   # The API reference (odoc), with warnings as errors.
   docs:
     name: docs
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -133,7 +133,7 @@ jobs:
   # Cross-platform check: build the engine and run the suite on macOS.
   smoke:
     name: smoke (macos)
-    # Disabled: GitHub-hosted runners are unavailable to this private fork, and ix runners are Linux only.
+    # Disabled: GitHub-hosted runners were unavailable while this fork was private, and ix runners are Linux only; re-enable now that it is public.
     if: false
     runs-on: macos-latest
     permissions:
@@ -163,7 +163,7 @@ jobs:
   # run. The switch is built from the OxCaml opam repository and cached.
   oxcaml:
     name: test (oxcaml)
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
