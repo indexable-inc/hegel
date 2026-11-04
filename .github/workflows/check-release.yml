@@ -10,7 +10,7 @@ jobs:
   check-release:
     name: check release
     if: "!contains(github.event.pull_request.labels.*.name, 'skip release')"
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:

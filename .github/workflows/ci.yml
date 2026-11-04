@@ -10,6 +10,12 @@
 # calls it, list that job in the `ci-ok` and `release` jobs' `needs`, add
 # the component to `COMPONENTS` in `.github/scripts/release.py`, and give
 # the release job (plus any follow-on publish jobs) its publishing steps.
+#
+# Runners: jobs run on the self-hosted `ix` runners only for pushes,
+# workflow_dispatch and pull requests from branches of this repository; pull
+# requests from forks run the same jobs on GitHub-hosted runners. Every
+# `runs-on` here and in the reusable workflows spells that out with the same
+# expression. Secrets and write tokens appear only in push-gated release jobs.
 name: CI
 
 on:
@@ -20,7 +26,9 @@ on:
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  # Keyed by PR number, not head_ref: a fork's branch can share a name with
+  # one here and would otherwise cancel that PR's run.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -31,7 +39,7 @@ jobs:
   # skipped reusable workflow reports no check runs at all.
   changes:
     name: changes
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       pull-requests: read
     outputs:
@@ -92,7 +100,7 @@ jobs:
   # a packaging dry run. Cheap enough to run on every change.
   lint:
     name: lint
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -212,7 +220,7 @@ jobs:
     name: test-minimal-versions
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -233,7 +241,7 @@ jobs:
     needs: changes
     # Disabled: needs the HEGEL_RELEASE_APP_PRIVATE_KEY App secret, which this fork does not have.
     if: false
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: write  # needed for ratchet auto-update
       pull-requests: write  # needed for creating PRs on main
@@ -309,7 +317,7 @@ jobs:
     name: nix
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.cpp == 'true'
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -331,7 +339,7 @@ jobs:
     name: ci-ok
     if: always()
     needs: [lint, libhegel, rust, python, typescript, cpp, java, ocaml, test-minimal-versions, coverage, nix]
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions: {}
     steps:
       - name: Check dependency results
