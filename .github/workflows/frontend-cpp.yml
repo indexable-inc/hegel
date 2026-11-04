@@ -16,7 +16,7 @@ jobs:
   # compiler and standard library.
   test:
     name: test (${{ matrix.compiler }}${{ matrix.stdlib && format(' with {0}', matrix.stdlib) || '' }})
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -44,7 +44,7 @@ jobs:
             packages: clang-18 libc++-18-dev libc++abi-18-dev
             cmake_flags: -DCMAKE_CXX_FLAGS="-stdlib=libc++"
 
-          # No macOS entry: GitHub-hosted runners are unavailable to this private fork, and ix runners are Linux only.
+          # No macOS entry: GitHub-hosted runners were unavailable while this fork was private, and ix runners are Linux only; re-enable now that it is public.
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -70,7 +70,7 @@ jobs:
   # tests switched on.
   consumer:
     name: consumer
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -85,7 +85,7 @@ jobs:
   # a strict C++17 project.
   cxx17:
     name: cxx17
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -101,7 +101,7 @@ jobs:
   # frontends/cpp/coverage-ratchet.json.
   coverage:
     name: coverage
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -122,7 +122,7 @@ jobs:
   # address+undefined and thread sanitizer builds of the suite.
   sanitizers:
     name: sanitizers
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -144,7 +144,7 @@ jobs:
   # project needs cargo even though the docs target never builds the engine.
   docs:
     name: docs
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -162,7 +162,7 @@ jobs:
   # libhegel by the root flake. nixfmt runs in ci.yml's nix job.
   nix:
     name: nix
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:

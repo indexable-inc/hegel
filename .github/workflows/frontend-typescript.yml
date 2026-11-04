@@ -15,7 +15,7 @@ jobs:
   # scripts, and the packed package bundled four ways and run in Chromium.
   test:
     name: test
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -48,7 +48,7 @@ jobs:
   # The built package on the oldest supported Node and on Bun and Deno.
   smoke:
     name: smoke (${{ matrix.runtime }} ${{ matrix.version }})
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -108,7 +108,7 @@ jobs:
   # The API reference (typedoc), with warnings as errors.
   docs:
     name: docs
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:

@@ -15,7 +15,7 @@ jobs:
   # The whole reactor (FFM needs JDK 22+) with the 100% coverage gate.
   test:
     name: test (java ${{ matrix.java-version }})
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -41,7 +41,7 @@ jobs:
   # hegel-lowlevel and hegel-jna on the JDKs the JNA artifact supports.
   test-jna:
     name: test hegel-jna (java ${{ matrix.java-version }})
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -67,7 +67,7 @@ jobs:
   # The suite on the other platforms the jars bundle an engine for.
   test-os:
     name: test (${{ matrix.os }})
-    # Disabled: GitHub-hosted runners are unavailable to this private fork, and ix runners are Linux only.
+    # Disabled: GitHub-hosted runners were unavailable while this fork was private, and ix runners are Linux only; re-enable now that it is public.
     if: false
     runs-on: ${{ matrix.os }}
     permissions:
@@ -92,7 +92,7 @@ jobs:
   # The API reference (javadoc), with doclint on.
   docs:
     name: docs
-    runs-on: ix
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ix' || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
