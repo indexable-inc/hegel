@@ -1,0 +1,22 @@
+[package]
+name = "hegel-sim-wasm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+publish = false
+description = "hegel::sim's wasm host: whole simulated worlds in wasm linear memory, with snapshot, fork and diff"
+
+[dependencies]
+hegel-sim-core = { path = "../core" }
+wasmtime = { version = "38", default-features = false, features = ["runtime", "cranelift", "std", "threads"] }
+walrus = "0.23"
+wasm-opt = "0.116"
+blake3 = "1"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+libc = "0.2"
+hegeltest = { path = "../../frontends/rust", features = ["sim"] }

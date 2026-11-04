@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["libhegel", "frontends/rust", "frontends/rust/macros", "frontends/python"]
+members = ["libhegel", "frontends/rust", "frontends/rust/macros", "frontends/python", "sim/core", "sim/hegel-sim", "sim/examples", "sim/machine", "sim/wasm-host"]
 
 [workspace.lints.clippy]
 too_many_arguments = "allow"

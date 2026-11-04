@@ -25,3 +25,17 @@ hegel::Hegel::new(|tc| { /* ... */ }).run_with_source(&mut Seeds(0));
 ```
 
 With the `static-engine` feature, `hegel` now builds for WASI (`wasm32-wasip1`, `wasm32-wasip2`), since its engine picks the WebAssembly platform backend there.
+
+It also adds `hegel::sim` behind the new `sim` feature: deterministic simulation testing. `hegel::sim` is a facade over `std::sync`, `std::thread`, `std::time` and `std::fs` (plus `mmap` and signals) that is std itself until the feature is on. With the feature on, a `hegel::sim::Sim` runs programs written against the facade on a PCT scheduler, with a switch point at every atomic, lock and syscall, and on a simulated Linux or macOS kernel: page cache, fsync and directory fsync, power loss that tears what was not synced, ENOSPC, EIO and flock/fcntl locks. Processes can be killed, crashed and restarted, with a different version if you like. Every schedule and fault decision is a Hegel draw, so a failing run shrinks to a minimal schedule and replays, and the trace is printed with it.
+
+```rust
+use hegel::sim::{Config, Sim, fs};
+
+#[hegel::test]
+fn survives_power_loss(tc: hegel::TestCase) {
+    let mut sim = Sim::new(&tc, Config::default());
+    sim.spawn("writer", || { fs::write("/data", b"hello").unwrap(); 0 });
+    sim.run();
+    // check what recovery sees with sim.read_file(..)
+}
+```

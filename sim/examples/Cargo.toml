@@ -1,0 +1,12 @@
+[package]
+name = "hegel-sim-examples"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+publish = false
+description = "Six planted durability and concurrency bugs, each in a buggy and a fixed variant, that hegel::sim finds"
+
+[dependencies]
+hegeltest = { path = "../../frontends/rust", features = ["sim"] }
+hegel-sim = { path = "../hegel-sim", features = ["sim"] }

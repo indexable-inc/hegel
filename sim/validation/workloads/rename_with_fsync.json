@@ -1,0 +1,16 @@
+{"name": "rename_with_fsync",
+ "ops": [
+   {"op": "mkdir", "path": "/d"},
+   {"op": "fsync_dir", "path": "/"},
+   {"op": "open", "fd": "f", "path": "/d/final", "flags": ["create", "write", "trunc"]},
+   {"op": "write", "fd": "f", "fill": {"byte": 65, "len": 8192}},
+   {"op": "fsync", "fd": "f"},
+   {"op": "close", "fd": "f"},
+   {"op": "fsync_dir", "path": "/d"},
+   {"op": "open", "fd": "t", "path": "/d/tmp", "flags": ["create", "write", "trunc"]},
+   {"op": "write", "fd": "t", "fill": {"byte": 66, "len": 8192}},
+   {"op": "fsync", "fd": "t"},
+   {"op": "close", "fd": "t"},
+   {"op": "rename", "from": "/d/tmp", "to": "/d/final"},
+   {"op": "fsync_dir", "path": "/d"}
+ ]}

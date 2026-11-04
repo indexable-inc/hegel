@@ -1,0 +1,12 @@
+{"name": "overwrite_in_place",
+ "ops": [
+   {"op": "open", "fd": "a", "path": "/data", "flags": ["create", "write", "trunc"]},
+   {"op": "write", "fd": "a", "fill": {"byte": 72, "len": 16384}},
+   {"op": "fsync", "fd": "a"},
+   {"op": "close", "fd": "a"},
+   {"op": "fsync_dir", "path": "/"},
+   {"op": "open", "fd": "b", "path": "/data", "flags": ["write"]},
+   {"op": "pwrite", "fd": "b", "offset": 6144, "fill": {"byte": 73, "len": 4096}},
+   {"op": "fdatasync", "fd": "b"},
+   {"op": "close", "fd": "b"}
+ ]}

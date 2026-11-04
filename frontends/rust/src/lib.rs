@@ -333,6 +333,10 @@ pub mod pretty;
 pub mod run_lifecycle;
 pub(crate) mod runner;
 pub mod stateful;
+#[cfg(feature = "sim")]
+mod sim_choices;
+#[cfg(feature = "sim")]
+pub use hegel_sim as sim;
 mod test_case;
 #[doc(hidden)]
 pub use control::currently_in_test_context;
