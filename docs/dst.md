@@ -1,9 +1,10 @@
 ---
 status: plan
 phases:
-  phase-1-native: building
-  phase-2-wasi: planned
-  phase-3-validation: planned
+  phase-1-native: landed
+  phase-2a-wasm-asyncify: building
+  phase-2b-wasm-stack-switching: planned
+  phase-3-validation: written, not run
 ---
 
 # Deterministic simulation testing in Hegel
@@ -77,9 +78,14 @@ All new crates are in the workspace under `sim/`, MIT, with no ix-specific code.
 | `hegel-sim-core` | `sim/core` | Sans-IO and dependency-free. The kernel model (`kernel`), the PCT scheduler core (`sched`), the virtual clock (`clock`), fault classes and swarm (`faults`), the `Choices` port, and the trace. Nothing in it does I/O, owns randomness or reads a clock. Native and WASI drivers share it. |
 | `hegel-sim` | `sim/hegel-sim` | The facade (`sync`, `thread`, `time`, `fs`, `mmap`, `signal`, `process`, `hint`) and the native driver (`Sim`, fibers via corosensei). Without the `sim` feature, every facade item is the std type or function, re-exported. With `sim`, each is a thin wrapper that runs a switch point before the std operation when called inside a running simulation, and behaves exactly like std outside one. |
 | `hegeltest` (feature `sim`) | `frontends/rust` | `impl hegel_sim::Choices for TestCase` and `pub use hegel_sim as sim`, so a test writes `hegel::sim::Sim::new(&tc, ..)`. |
-| `hegel-wasi` | `sim/wasi` | Phase 2: a WASI preview 1 host on Wasmtime (async, fibers) whose every import goes to the `hegel-sim-core` kernel, plus the atomic-yield instrumentation pass. |
+| `hegel-sim-machine` | `sim/machine` | Phase 2: `hegel-sim-core` behind a C ABI, built as a `wasm32-unknown-unknown` cdylib: one instance is one simulated machine (kernel, scheduler, clock, swarm, trace), all of it in that instance's linear memory. Its only imports are the draws. |
+| `hegel-sim-wasm` | `sim/wasm-host` | Phase 2: the Wasmtime host. It instruments and loads program modules, routes their WASI imports to the machine instance, switches their threads, and owns the snapshot manager. |
 | `hegel-sim-examples` | `sim/examples` | `publish = false`. The six planted bugs as tiny programs, each with a buggy and a fixed variant, and the Hegel tests that catch the buggy variant and pass the fixed one. |
 | validation | `sim/validation` | Phase 3: `validate_kernel_model.py` and the model's crash-state membership checker. |
+
+The kernel model must compile to both native code and `wasm32-unknown-unknown` from phase 1 on, because phase 2
+runs it as a wasm module; it has no dependencies, no I/O and no `std::time`, and CI builds it for both
+targets.
 
 Production crates depend on `hegel-sim` only, which in a normal build has no dependencies and compiles to
 re-exports of std. A test enables `hegel-sim/sim`. Cargo's feature unification then also turns the production
@@ -352,13 +358,22 @@ fn rows_are_exactly_once(tc: hegel::TestCase) {
 
 - `Sim::new(&dyn Choices, Config)` draws the swarm and the scheduler parameters.
 - `spawn(name, program) -> Pid`; `kill(pid)`; `power_loss()`; `os_crash()`; `signal(pid, sig)`.
-- `run() -> Outcome`: `Exited(Vec<(Pid, i32)>) | Crashed(CrashReport)`. A deadlock, the step bound, a thread
-  panic and a failed `always` all panic with the trace, which fails the Hegel case.
+- `run() -> Outcome`: `Exited(Vec<Exit>) | Crashed(CrashKind)`. A deadlock, the step bound, a panic in any
+  simulated thread and a failed `always` all panic with the trace, which fails the Hegel case. (So a panicking
+  simulated thread fails the run instead of surfacing as `Err` from `join`, unlike std: under test a panic is
+  a finding.)
+- `calm(|sim| ..)`: run setup with every fault class and crash off.
 - `pick(label, &[T]) -> &T`, `draw_bool(label, p)`, `draw_int(label, lo, hi)`: draws through the same port, noted
   in the trace.
 - Oracle: `hegel_sim::oracle::always(cond, "name")` (fails the case with the trace),
   `sometimes(cond, "name")` (reachability, listed in `Sim::report()`), `unreachable("name")`.
-- `Sim::fs_view()`: the page-cache namespace and contents, read-only, for assertions made from outside.
+- `Sim::read_file(path)`, `Sim::list(dir)`: the page-cache namespace and contents (after a crash, the resolved
+  state), read-only, for assertions made from outside.
+- `hegel_sim::fork::explore(&mut sim, n, seed, body)`: the native snapshot (see "Snapshots").
+
+Facade deviations from std, each deliberate: `sync_channel(0)` is a one-slot buffer, not a rendezvous;
+`File::try_clone` is `Unsupported` under the simulation (no `dup` in the model); `thread::scope` is not
+provided.
 
 ### Trace and replay
 
@@ -382,28 +397,119 @@ operation with its `Ordering`. The plan is for `hegel_sim::sync::atomic` to forw
 `weakmem` feature, which composes the two: this scheduler picks threads, and weakmem picks which store each
 load reads. That is not part of these phases.
 
-## Phase 2: wasm
+## Phase 2: the whole world in wasm, snapshot and fork
 
-`hegel-wasi` runs a `wasm32-wasip1-threads` module on Wasmtime with `async_support`:
+Design change (2026-11-04, from the owner): the simulated world must be snapshot-able and fork-able, so a test can
+run to an interesting state once and then explore many crash points or schedules from it without rerunning the
+prefix. Everything below follows from one rule: **all world state lives in wasm linear memory**, and the host
+holds almost nothing.
 
-- **Instrumentation at load time** (walrus): before every atomic instruction (`i32/i64.atomic.*` load, store,
-  RMW and cmpxchg, plus `atomic.fence`), insert `call $hegel.yield`. Replace `memory.atomic.wait32/64` and
-  `memory.atomic.notify` with calls to the host's `hegel.wait32/64` and `hegel.notify`, adding the memarg
-  offset to the address, so the futex lives in the scheduler. A real wait would block the only OS thread.
-- **Threads are fibers.** Each wasm thread is its own `Store` sharing the module's `SharedMemory`, as in
-  wasi-threads. Its `wasi_thread_start` runs as a future on the host's deterministic executor. The imported
-  `wasi.thread-spawn` instantiates the new store. `hegel.yield` is an async host function. It returns `Pending`
-  exactly when the shared PCT core says to switch, and Wasmtime's fiber suspends the guest. The same
-  `hegel-sim-core` scheduler, kernel and clock drive it, so a wasm case and a native case shrink and replay
-  the same way.
-- **WASI preview 1** is our own implementation over the kernel model: files, directories, `fd_sync` and
-  `fd_datasync`, `path_rename`, clocks from the virtual clock, `poll_oneoff` sleeps, `random_get` from a
-  Hegel draw, and `proc_exit`. Calls with no model return `ENOSYS`, which is a real errno, and the call's name
-  is traced. `hegel.flock` adds locks, and the guest declares it as an extern import.
-- **Processes and versions**: each process instantiates a module (its own memory). Restart can instantiate a
-  different module, which is the version-skew test for wasm. kill -9 drops the process's futures, and Wasmtime
-  unwinds the suspended guest stacks.
-- Out of scope in wasm: mmap (WASI has none), signals (none), and weak memory (see above).
+### Pieces
+
+- **The machine module.** `hegel-sim-core` (kernel, scheduler, clock, swarm, trace) compiled to
+  `wasm32-unknown-unknown` behind a small C ABI (`sim/machine`). One instance is one simulated machine, and its
+  linear memory holds the whole machine. Its only imports are the draws (`hegel.int(lo, hi)`, `hegel.coin(p)`),
+  answered by the host from the case's `Choices`. Its exports take and return requests in a fixed binary encoding
+  (`kernel::wire`) through a buffer in its own memory: `syscall(pid, tid)`, `crash(kind)`, `pick()`, `block`,
+  `wake`, `spawn`, `exit`, `trace`. Because phase 1 already builds the core for both targets, the native driver
+  and the machine module run the same code.
+- **Process modules.** A program is a `wasm32-wasip1-threads` module. A process is one instance of it with its
+  own memory; its WASI imports (and the extra `hegel.mmap`, `hegel.msync`, `hegel.flock`, `hegel.signal`
+  imports) go to the host, which only encodes the call, hands it to the machine instance, and writes the result
+  back. Threads of a process are coroutines inside that one instance (std's `thread::spawn` calls
+  `wasi.thread-spawn`; the host starts a coroutine at the instance's `wasi_thread_start(tid, arg)`, and wasi-libc
+  has already placed that thread's stack and TLS in linear memory). kill -9 drops the instance. Power loss calls
+  the machine's `crash`. Restart, with the same or another version, instantiates a module against the same
+  machine.
+- **Load-time instrumentation** (walrus): `call $hegel.yield` before every atomic instruction
+  (`*.atomic.*` load, store, RMW, cmpxchg, `atomic.fence`); `memory.atomic.wait*`/`notify` replaced by
+  `hegel.wait*`/`hegel.notify` with the memarg offset folded into the address (a real wait would block the only
+  OS thread); every mutable global exported (`__stack_pointer`, `__tls_base`, ...) so a snapshot can read and
+  restore it.
+- **The host** (`sim/wasm-host`, upstream Wasmtime, synchronous API) is the scheduler's choice point (it asks the
+  machine whom to run and switches to that coroutine), the draw port, and the snapshot manager. Its own state is
+  a few tables: instances by pid, coroutine entry points by tid, pending replies. It is serializable by design.
+
+### Stack switching: one mode per run, chosen explicitly
+
+A coroutine's suspended stack must also live in memory the snapshot covers. Two modes, selected by
+`WasmConfig::stacks(StackMode::..)`; there is no fallback between them, and asking for a mode the host cannot do
+stops with an error that names the mode and the platform.
+
+- **2a: `StackMode::Asyncify`.** Binaryen's Asyncify pass (through the `wasm-opt` crate, which bundles binaryen)
+  rewrites the program so that an import listed in `asyncify-imports` can unwind the whole wasm stack into a
+  buffer in linear memory and later rewind it. The listed imports are `hegel.yield`, `hegel.wait*` and every WASI
+  and `hegel.*` syscall, since each is a switch point. The unwind buffers live in pages the host grows into the
+  process's memory. A switch is an unwind of the running coroutine and a rewind of the next one. Works on
+  upstream Wasmtime on every platform it supports (including aarch64 macOS). Cost: code size and a check after
+  every call that can reach a switch point, plus a rewind proportional to stack depth per switch. The overhead
+  is measured on a blaze-like workload (hash maps, sorting, string building, many small allocations) and
+  recorded in "Measurements" below.
+- **2b: `StackMode::Continuations`.** The stack-switching proposal (typed continuations), executed by our
+  Wasmtime fork, `github.com/indexable-inc/wasmtime` (public), branch `sim-stacks`. A switch is a native stack
+  switch, close to free per switch, with no code-size cost. Continuation stacks come from a region the snapshot
+  manager owns (`Config::with_continuation_stacks`, landed on `sim-stacks` as a26d24c79), so a snapshot is the
+  linear memories plus that region. The program is compiled with the proposal's instructions by a load-time
+  rewrite of `hegel.yield` into `suspend`, and of each coroutine entry into `cont.new` plus `resume`.
+  Why both modes stay: Asyncify runs on every platform and on upstream Wasmtime today; continuations are the
+  fast path but Wasmtime implements them only on x86_64 Unix so far. A run states which mode it wants.
+
+  What 2b still needs from the fork:
+  1. *done:* an embedder hook for continuation stack memory, and the list of stack ranges per store.
+  2. `VMContRef` records (today a `Box` per continuation on the host heap) allocated in the same region, so the
+     region alone describes every suspended continuation.
+  3. Restorable stacks. A suspended native stack holds return addresses into compiled code and pointers to the
+     instance's vmctx. Either pin the region, the code and the vmctx at fixed addresses (one address-space
+     layout for every process that restores the snapshot), or, on restore, walk each stack with Cranelift's
+     stack maps and frame-pointer chain and rebase those pointers. Pinning is simpler and is the first plan.
+  4. An aarch64 backend for stack switching (the Mac is aarch64). Until then, 2b runs in an x86_64 ix VM.
+  The fork is public, so hegel depends on it by git revision under a non-default feature (`continuations`) of
+  `hegel-sim-wasm`; the default build stays on upstream Wasmtime with Asyncify. Moving 2b upstream is the long
+  term home for items 1 to 3.
+
+### Snapshots
+
+```rust
+let mut world = World::new(&tc, WasmConfig::default())?;
+world.spawn("app", &app_v1)?;
+world.run_until(|w| w.step() >= 500)?;
+let snap = world.snapshot();                 // CoW pages + host tables, content-hashed
+let id = snap.id();                          // blake3 over the manifest: equal worlds, equal ids
+let outcomes = world.fork(&snap, 64, |w, i| { w.reseed(i); w.run() })?;
+let d = Snapshot::diff(&before, &after);     // pages changed per memory, host-table changes, files changed
+snap.save(&store_dir)?;                       // pages stored once by hash; ship the dir anywhere
+let again = Snapshot::load(&store_dir, id)?;
+```
+
+- A **snapshot** is every linear memory (machine and processes) split into 4 KiB pages, each stored once in a
+  page store keyed by its blake3 hash, plus the host tables, plus every exported global. Taking one costs a hash
+  per page changed since the last snapshot (a dirty-page scan against the previous snapshot), so many snapshots
+  of one run share almost every page.
+- **Fork** restores a snapshot into a fresh `Store` (instantiate each module, overwrite its memory and globals
+  from the pages) as many times as asked, in one process. Branches share the page store, so 64 branches of a
+  100 MB world cost 64 copies of only the pages each branch writes once they run (pages are copied in on
+  restore; mapping them copy-on-write is the follow-up once a custom `MemoryCreator` is wired).
+- **Choices.** A snapshot records the choice prefix that led to it. A branch draws its suffix from its own source
+  (a seed, or Hegel's `explore::Source`), and a failing branch replays from scratch as prefix plus suffix, so
+  Hegel can still shrink it (over the suffix first).
+- **Diff** compares page hashes per memory, then decodes what changed into the machine's own terms through its
+  `dump` export: files and directories added, removed or changed, per durability layer.
+- **Save and ship.** The page store is a directory of hash-named pages plus manifests. A snapshot is valid in
+  any process with the same module bytes (whose hashes are in the manifest).
+
+### Native snapshots (day one)
+
+The native driver cannot copy its world (fiber stacks hold raw pointers into the host's heap), so phase 1
+provides `hegel_sim::fork::explore`: fork the whole host process at the snapshot point, AFL fork-server style,
+run one branch per child with seeded choices, collect each outcome over a pipe, and re-run a failing branch
+in-process with `fork::replay`. Limits: no save, no dedup, no shipping, one process per branch, and the usual
+`fork()` constraints (only the calling thread survives, so run with `--test-threads=1` when other host threads
+may hold locks; macOS frameworks that refuse to run after fork must not be touched in a child).
+
+### Measurements
+
+Recorded here as phase 2a lands: Asyncify's code-size and run-time overhead on the blaze-like workload, the cost
+per switch in each mode, and snapshot and restore cost per MB.
 
 ## Phase 3: validating the model against real kernels
 
@@ -432,6 +538,7 @@ state that needs it, and no observed state falls outside the model.
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | `hegel-sim-core` (kernel, PCT, clock, swarm, trace), `hegel-sim` facade and native driver with crash and restart, the oracle, `hegeltest` `sim` feature, `hegel-sim-examples` with the six planted bugs (buggy caught, fixed passing) | building |
-| 2 | `hegel-wasi`: Wasmtime async host, atomic-yield instrumentation, WASI p1 over the kernel, threads as fibers, versioned restart, a planted-bug wasm example | planned |
-| 3 | `sim/validation`: dm-log-writes recorder and crash-state replayer, model membership checker | planned (written, not run) |
+| 1 | `hegel-sim-core` (kernel, PCT, clock, swarm, trace; builds for `wasm32-unknown-unknown`), `hegel-sim` facade and native driver with crash and restart, the oracle, native `fork()` snapshots, `hegeltest` `sim` feature, `hegel-sim-examples` with the six planted bugs (buggy caught, fixed passing) | landed |
+| 2a | `hegel-sim-machine` (the kernel as a wasm module), `hegel-sim-wasm` (Wasmtime host, atomic-yield instrumentation, Asyncify stack switching, WASI p1 over the machine), the snapshot manager (snapshot, fork N, diff, save), a planted-bug wasm example, Asyncify overhead measured | building |
+| 2b | Stack switching from our Wasmtime fork (`indexable-inc/wasmtime`, branch `sim-stacks`) with continuation stacks in a snapshot-owned region | planned |
+| 3 | `sim/validation`: dm-log-writes recorder and crash-state replayer, model membership checker | written, not run |
