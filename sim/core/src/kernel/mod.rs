@@ -294,6 +294,15 @@ pub enum CrashKind {
     OsCrash,
 }
 
+/// One path of an observed crash state, for [`Kernel::could_crash_to`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Observed {
+    /// A directory.
+    Dir,
+    /// A regular file with these bytes.
+    File(Vec<u8>),
+}
+
 /// What the kernel needs from the driver for one call: the choice port, the
 /// run's swarm, and where to record what happened.
 pub struct Env<'a> {
@@ -1244,6 +1253,60 @@ impl Kernel {
         self.fds.clear();
         self.woken.clear();
         lines
+    }
+
+    /// Whether a crash of `kind` can leave exactly `observed` (every path
+    /// under `/`, excluding `/`), with `swarm`'s crash-shape classes
+    /// (`TornWrites`, `ZerosPastEof`) deciding which fates exist. `Ok` says how
+    /// many pending directory operations the matching state kept; `Err` gives,
+    /// for the closest prefix, the first path or page no draw produces.
+    pub fn could_crash_to(&self, kind: CrashKind, swarm: &Swarm, observed: &BTreeMap<String, Observed>) -> Result<String, String> {
+        let power = match kind {
+            CrashKind::Kill9(_) => return Err("kill -9 leaves the page cache, so it is not a crash state".into()),
+            CrashKind::PowerLoss => true,
+            CrashKind::OsCrash => false,
+        };
+        let base = if power { &self.media_ns } else { &self.dev_ns };
+        let pending: Vec<&DirOp> = self.dir_ops.iter().filter(|op| if power { !op.on_media } else { !op.on_dev }).collect();
+        let mut best = String::new();
+        for keep in 0..=pending.len() {
+            let mut ns = base.clone();
+            for op in &pending[..keep] {
+                apply(&mut ns, &op.kind);
+            }
+            let mut found: BTreeMap<String, Ino> = BTreeMap::new();
+            let mut stack = vec![(ROOT, String::new())];
+            while let Some((d, prefix)) = stack.pop() {
+                for (name, child) in ns.get(&d).cloned().unwrap_or_default() {
+                    let p = format!("{prefix}/{name}");
+                    found.insert(p.clone(), child);
+                    if self.inodes.get(&child).is_some_and(|i| i.is_dir()) {
+                        stack.push((child, p));
+                    }
+                }
+            }
+            let mismatch = (|| {
+                for (p, want) in observed {
+                    let Some(ino) = found.get(p) else { return Err(format!("{p} exists, but not after keeping {keep} of {} pending directory ops", pending.len())) };
+                    match (&self.inodes[ino].kind, want) {
+                        (Kind::Dir(_), Observed::Dir) => {}
+                        (Kind::File(f), Observed::File(bytes)) => f
+                            .could_resolve_to(power, swarm.on(Fault::ZerosPastEof), swarm.on(Fault::TornWrites), self.cfg.atomic_write_unit, bytes)
+                            .map_err(|e| format!("{p}: {e}"))?,
+                        _ => return Err(format!("{p} has the wrong type")),
+                    }
+                }
+                if let Some(p) = found.keys().find(|p| !observed.contains_key(*p)) {
+                    return Err(format!("{p} is missing, but survives keeping {keep} of {} pending directory ops", pending.len()));
+                }
+                Ok(())
+            })();
+            match mismatch {
+                Ok(()) => return Ok(format!("kept {keep} of {} pending directory ops", pending.len())),
+                Err(e) => best = e,
+            }
+        }
+        Err(best)
     }
 
     // ---- inspection, for oracles ----

@@ -1,0 +1,11 @@
+{"name": "create_no_dirsync",
+ "ops": [
+   {"op": "open", "fd": "a", "path": "/first", "flags": ["create", "write", "trunc"]},
+   {"op": "write", "fd": "a", "fill": {"byte": 70, "len": 4096}},
+   {"op": "fsync", "fd": "a"},
+   {"op": "close", "fd": "a"},
+   {"op": "open", "fd": "b", "path": "/second", "flags": ["create", "write", "trunc"]},
+   {"op": "write", "fd": "b", "fill": {"byte": 71, "len": 4096}},
+   {"op": "close", "fd": "b"},
+   {"op": "fsync_dir", "path": "/"}
+ ]}

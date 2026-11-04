@@ -201,6 +201,54 @@ impl FileData {
         format!("pages written {written:?}, dropped {dropped:?}")
     }
 
+    /// Whether some crash [`resolve`](Self::resolve) can draw leaves exactly
+    /// `observed`, with the same candidates per page and the same tearing at
+    /// `aw_unit`. `Err` names the first size or page no draw produces.
+    pub(crate) fn could_resolve_to(&self, power_loss: bool, zeros_past_eof: bool, torn: bool, aw_unit: u64, observed: &[u8]) -> Result<(), String> {
+        let (base, hist, mid): (&[u8], &[u64], Option<&[u8]>) = if power_loss {
+            let mid = (self.dev != self.media).then_some(self.dev.as_slice());
+            (&self.media, &self.hist_media, mid)
+        } else {
+            (&self.dev, &self.hist_dev, None)
+        };
+        let size = observed.len();
+        if !hist.contains(&(size as u64)) {
+            return Err(format!("size {size} is not one the file had since its last sync ({hist:?})"));
+        }
+        let cache = self.cache.bytes();
+        for p in 0..pages(size) {
+            let r = page_range(p, size);
+            let want = &observed[r.clone()];
+            let old = page_of(base, p, size);
+            let new = if self.stale.contains(&p) { old.clone() } else { page_of(cache, p, size) };
+            let beyond_old = p * PAGE >= base.len() as u64;
+            let mut cands: Vec<Vec<u8>> = Vec::new();
+            if beyond_old {
+                cands.push(new);
+                cands.extend(mid.map(|m| page_of(m, p, size)));
+                if zeros_past_eof {
+                    cands.push(vec![0u8; r.len()]);
+                }
+            } else {
+                cands.push(old.clone());
+                cands.extend(mid.map(|m| page_of(m, p, size)));
+                cands.push(new);
+            }
+            if cands.iter().any(|c| c.as_slice() == want) {
+                continue;
+            }
+            let unit = aw_unit as usize;
+            let tears = |c: &Vec<u8>| {
+                c.chunks(unit).zip(want.chunks(unit)).zip(old.chunks(unit)).all(|((n, w), o)| n == w || o == w)
+            };
+            if torn && !beyond_old && cands.iter().skip(1).any(tears) {
+                continue;
+            }
+            return Err(format!("page {p} matches no version the file had (nor a tear of one at {aw_unit} bytes)"));
+        }
+        Ok(())
+    }
+
     /// The bytes this file holds after a crash that resolves from `baseline`
     /// (media for power loss, the device cache for an OS crash).
     pub(crate) fn resolve(&self, power_loss: bool, env: &mut Env<'_>, aw_unit: u64) -> (Vec<u8>, String) {
